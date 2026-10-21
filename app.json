@@ -1,0 +1,53 @@
+{
+  "expo": {
+    "name": "Cargo Admin",
+    "slug": "cargo-admin-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "cargoadmin",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.eticastories.cargoadmin",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "package": "com.eticastories.cargoadmin",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#EEF3F6"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-blank.png",
+          "imageWidth": 120,
+          "resizeMode": "contain",
+          "backgroundColor": "#0D3949",
+          "dark": {
+            "image": "./assets/splash-blank.png",
+            "backgroundColor": "#0D3949"
+          }
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ]
+  }
+}
