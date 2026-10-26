@@ -34,6 +34,7 @@ export const API_ENDPOINTS = {
   },
   CONTAINERS: crud("/containers"),
   STUFFINGS: { BASE: "/stuffings", BY_ID: (id: string) => `/stuffings/${id}` },
+  PACKAGES: { BASE: "/packages", BY_ID: (id: string) => `/packages/${id}`, BY_BOOKING: (id: string) => `/packages/booking/${id}` },
   INVOICES: { BASE: "/invoices", BY_ID: (id: string) => `/invoices/${id}` },
   CREDIT_NOTES: crud("/credit-notes"),
   DAILY_EXPENSES: crud("/daily-expenses"),

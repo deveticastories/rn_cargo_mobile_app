@@ -144,7 +144,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
             tone="success"
             onPress={() => navigation.navigate("More", { screen: "MasterList", params: { masterKey: "pickupAssigns" }, initial: false })}
           />
-          <QuickAction icon={ArrowLeftRight} label="Stuffing" tone="purple" onPress={() => navigation.navigate("Containers")} />
+          <QuickAction icon={ArrowLeftRight} label="Stuffing" tone="purple" onPress={() => navigation.navigate("Stuffing")} />
           <QuickAction
             icon={FileText}
             label="Invoice"

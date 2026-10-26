@@ -72,6 +72,53 @@ export const selectBookingsPerContainer = createSelector([(s: RootState) => s.co
   return map;
 });
 
+/* -------------------------------- Stuffing ------------------------------- */
+
+/**
+ * Per booking: the bundle numbers on its packing list, and its bundle mark
+ * IDs. Mark IDs number every saved bundle across all packing lists in id
+ * order, matching the web console.
+ */
+export const selectPackingByBooking = createSelector([(s: RootState) => s.containers.packages], (packages) => {
+  const markOf = new Map(
+    packages
+      .flatMap((p) => p.bundles.map((b) => b.id))
+      .filter(Boolean)
+      .sort()
+      .map((id, i) => [id, i + 1] as const)
+  );
+  const map = new Map<string, { bundleNos: Set<number>; marks: number[] }>();
+  for (const p of packages) {
+    const entry = map.get(p.booking) ?? { bundleNos: new Set<number>(), marks: [] };
+    for (const b of [...p.bundles].sort((x, y) => x.bundleNo - y.bundleNo)) {
+      entry.bundleNos.add(b.bundleNo);
+      const mark = markOf.get(b.id);
+      if (mark) entry.marks.push(mark);
+    }
+    map.set(p.booking, entry);
+  }
+  return map;
+});
+
+/** Ready to stuff: not yet sent to stuffing, and every bundle is on the packing list. */
+export const selectReadyToStuff = createSelector([selectBookingsSorted, selectPackingByBooking], (bookings, packing) =>
+  bookings.filter(
+    (b) => b.stuffStatus === "Pending" && (packing.get(b.id)?.bundleNos.size ?? 0) >= Math.max(1, b.actualBundle || b.bundleCount || 1)
+  )
+);
+
+/** The stuffing queue: sent from Ready to stuff and waiting for a container. */
+export const selectAwaitingStuffing = createSelector([selectBookingsSorted], (bookings) => bookings.filter((b) => b.stuffStatus === "Ready to Stuff"));
+
+/** Containers a stuffing can go into: not stuffed and not used by an earlier stuffing. */
+export const selectStuffableContainers = createSelector(
+  [(s: RootState) => s.containers.items, (s: RootState) => s.containers.stuffings],
+  (containers, stuffings) => {
+    const used = new Set(stuffings.map((st) => st.container));
+    return containers.filter((c) => c.status !== "Stuffed" && !used.has(c.id));
+  }
+);
+
 /** Sea voyage progress 0..1 between ETD Kochi and ETA UAE. */
 export function voyageProgress(c: Container): number | null {
   const etd = parseDate(c.etdCok);

@@ -12,6 +12,7 @@ export type BundleType = "Bundle" | "Box" | "CBM" | "KG";
 export type ProductType = "Branded" | "Normal";
 export type RepackingStatus = "Ready to Ship" | "Repacking Required";
 export type StuffStatus = "Pending" | "Ready to Stuff" | "Stuffed";
+export type PackageListStatus = "Pending" | "Added";
 export type PaymentType = "Cash" | "UPI";
 export type DeliveryPartnerStatus = "Pending" | "Paid";
 
@@ -51,6 +52,8 @@ export interface Booking {
   productType: ProductType | "";
   repackingStatus: RepackingStatus | "";
   stuffStatus: StuffStatus;
+  /** "Added" once every bundle has a packing list (set by Ready to ship / Repacking). */
+  packageListStatus: PackageListStatus;
   /** Only meaningful when `productType` is "Branded". */
   brandHandlingCharge: number;
   /** Only meaningful when `billOption` is "Without Bill". */
@@ -83,6 +86,13 @@ export interface Stuffing {
   container: string;
   bookings: string[];
   date: string;
+}
+
+/** A booking's packing list: one entry per repacked bundle. */
+export interface BookingPackage {
+  id: string;
+  booking: string;
+  bundles: { id: string; bundleNo: number }[];
 }
 
 export interface Invoice {

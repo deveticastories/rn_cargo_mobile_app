@@ -1,35 +1,46 @@
 import { createSlice } from "@reduxjs/toolkit";
 import { errorMessage } from "@/api/client";
 import { containerService } from "@/services/containerService";
-import type { Container, LoadStatus, Stuffing } from "@/types";
+import { bookingService } from "@/services/bookingService";
+import type { BookingPackage, Container, LoadStatus, Stuffing } from "@/types";
 import { createAppAsyncThunk } from "../thunk";
 import { fetchBookings } from "./bookingsSlice";
 
 interface ContainersState {
   items: Container[];
   stuffings: Stuffing[];
+  packages: BookingPackage[];
   status: LoadStatus;
   error: string | null;
   stuffingStatus: LoadStatus;
 }
 
-const initialState: ContainersState = { items: [], stuffings: [], status: "idle", error: null, stuffingStatus: "idle" };
+const initialState: ContainersState = { items: [], stuffings: [], packages: [], status: "idle", error: null, stuffingStatus: "idle" };
 
 export const fetchContainers = createAppAsyncThunk("containers/fetch", async (_: void, { rejectWithValue }) => {
   try {
-    const [items, stuffings] = await Promise.all([containerService.list(), containerService.listStuffings()]);
-    return { items, stuffings };
+    const [items, stuffings, packages] = await Promise.all([
+      containerService.list(),
+      containerService.listStuffings(),
+      // Like the web console, a failed packing-list load just means nothing counts as packed yet.
+      containerService.listPackages().catch(() => [] as BookingPackage[]),
+    ]);
+    return { items, stuffings, packages };
   } catch (err) {
     return rejectWithValue(errorMessage(err, "Couldn't load containers."));
   }
 });
 
-/** Loads one booking into a container (a `/stuffings` record), then refreshes both lists. */
+/**
+ * "Submit stuffing" (same steps as the web console): records the bookings in
+ * the container, marks each booking Stuffed, then refreshes both lists.
+ */
 export const loadIntoContainer = createAppAsyncThunk(
   "containers/stuff",
   async (args: { containerId: string; bookingIds: string[] }, { dispatch, rejectWithValue }) => {
     try {
       await containerService.createStuffing(args.containerId, args.bookingIds);
+      await Promise.all(args.bookingIds.map((id) => bookingService.updateStuffStatus(id, "Stuffed")));
       await Promise.all([dispatch(fetchContainers()), dispatch(fetchBookings())]);
     } catch (err) {
       return rejectWithValue(errorMessage(err, "Couldn't load the booking into the container."));
@@ -51,6 +62,7 @@ const containersSlice = createSlice({
         state.status = "succeeded";
         state.items = payload.items;
         state.stuffings = payload.stuffings;
+        state.packages = payload.packages;
       })
       .addCase(fetchContainers.rejected, (state, { payload }) => {
         state.status = "failed";

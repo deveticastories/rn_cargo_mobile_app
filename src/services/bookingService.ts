@@ -6,7 +6,7 @@
  */
 import { api } from "@/api/client";
 import { API_ENDPOINTS } from "@/api/endpoints";
-import type { BackendDoc, Booking, StuffStatus } from "@/types";
+import type { BackendDoc, Booking, RepackingStatus, StuffStatus } from "@/types";
 import { itemFrom, listFrom, num, partyFromRef, refField, str } from "./mappers";
 
 export function toBooking(doc: BackendDoc): Booking {
@@ -24,6 +24,7 @@ export function toBooking(doc: BackendDoc): Booking {
     productType: (doc.productType as Booking["productType"]) ?? "",
     repackingStatus: (doc.packingStatus as Booking["repackingStatus"]) ?? "",
     stuffStatus: stuffStatus === "Stuffed" || stuffStatus === "Ready to Stuff" ? stuffStatus : "Pending",
+    packageListStatus: doc.packageListStatus === "Added" ? "Added" : "Pending",
     brandHandlingCharge: num(doc.brandHandlingCharge),
     pickupCharge: num(doc.pickupCharge),
     bundleHandlingCharge: num(doc.bundleHandlingCharge),
@@ -41,6 +42,8 @@ export interface BookingInput {
   billOption: "With Bill" | "Without Bill";
   bundleType: "Bundle" | "Box" | "CBM" | "KG";
   productType: "Branded" | "Normal";
+  /** Package status: whether the goods still need repacking before they can ship. */
+  packingStatus: RepackingStatus;
   bundleCount: number;
   brandHandlingCharge: number;
   pickupCharge: number;
@@ -58,7 +61,7 @@ function toPayload(input: BookingInput) {
     bundleType: input.bundleType,
     productType: input.productType,
     bundleCount: input.bundleCount,
-    packingStatus: "Repacking Required",
+    packingStatus: input.packingStatus,
     brandHandlingCharge: input.productType === "Branded" ? input.brandHandlingCharge || 0 : 0,
     pickupCharge: input.billOption === "Without Bill" ? input.pickupCharge || 0 : 0,
     bundleHandlingCharge: input.bundleCount < 5 ? input.bundleHandlingCharge || 0 : 0,
@@ -81,6 +84,10 @@ export const bookingService = {
   },
   async remove(id: string): Promise<void> {
     await api.delete(API_ENDPOINTS.BOOKINGS.BY_ID(id));
+  },
+  /** Marks the booking's packing list complete (every bundle has one). */
+  async markPackageListAdded(id: string): Promise<void> {
+    await api.patch(API_ENDPOINTS.BOOKINGS.PACKAGE_LIST_STATUS(id), { packageListStatus: "Added" });
   },
   /** The only way cargo-backend accepts a `stuffStatus` change. */
   async updateStuffStatus(id: string, stuffStatus: StuffStatus): Promise<void> {

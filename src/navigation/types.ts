@@ -11,12 +11,18 @@ export type MoreStackParamList = {
   MoreHome: undefined;
   Finance: { tab?: "invoices" | "receipts" | "expenses" } | undefined;
   MasterList: { masterKey: MasterKey };
+  /** Web console's Stuffing → "Stuffed list": every stuffed container. */
+  StuffedContainers: undefined;
+  /** One stuffed container's bookings, their charges and bundles. */
+  StuffedContainer: { stuffingId: string };
 };
 
 export type MainTabParamList = {
   Home: undefined;
   Bookings: { filter?: BookingFilter } | undefined;
-  Containers: undefined;
+  Invoices: undefined;
+  DeliveryNotes: undefined;
+  Stuffing: undefined;
   More: NavigatorScreenParams<MoreStackParamList> | undefined;
 };
 
@@ -24,6 +30,11 @@ export type RootStackParamList = {
   Login: undefined;
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
   BookingDetail: { id: string };
+  Containers: undefined;
+  /** Web console's Repacking page: build the bundles of a "Repacking Required" booking. */
+  Repacking: { bookingId?: string } | undefined;
+  /** Web console's Ready to ship page: save the packing list of each bundle. */
+  ReadyToShip: { bookingId?: string } | undefined;
   NewBooking: undefined;
   MasterForm: { masterKey: MasterKey; id?: string };
 };

@@ -51,6 +51,24 @@ export interface FieldDef {
   visibleWhen?: (values: Record<string, string>) => boolean;
   /** Password-style fields: blank on edit means "keep current". */
   optionalOnEdit?: boolean;
+  /** Pre-filled on a new record (and sent even when the field is hidden). */
+  defaultValue?: string;
+  /** Not shown at all in this context. */
+  hidden?: (ctx: FormContext) => boolean;
+  /** Shown but locked in this context; its value is never sent. */
+  readOnly?: (ctx: FormContext) => boolean;
+  /** A stored 0 shows as an empty box, so a number can be typed straight in. */
+  blankWhenZero?: boolean;
+  /** Help text under the field. */
+  hint?: string;
+  /** Ask before switching to another option; return null to switch straight away. */
+  confirmChange?: (next: string, ctx: FormContext) => { title: string; message: string } | null;
+}
+
+/** Whether the form is editing, and the record's values as loaded (empty for a new one). */
+export interface FormContext {
+  isEdit: boolean;
+  initial: Record<string, string>;
 }
 
 type IconType = ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
@@ -74,6 +92,10 @@ export interface MasterDef {
   autoCode?: { field: string; prefix: string };
   /** Other masters a ref field needs loaded. */
   dependsOn?: MasterKey[];
+  /** Module-specific checks after the per-field ones. */
+  validate?: (values: Record<string, string>, ctx: FormContext) => string | null;
+  /** Last tweaks to the payload before it's sent. */
+  adjustPayload?: (payload: Record<string, unknown>, ctx: FormContext) => void;
 }
 
 const name = (doc: BackendDoc) => str(doc.name);
@@ -264,15 +286,52 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
       { key: "lrNo", label: "LR No", type: "text", required: true },
       { key: "bundleCount", label: "Bundle count", type: "number", required: true },
       { key: "amount", label: "Amount", type: "number", required: true },
-      { key: "paymentStatus", label: "Payment", type: "select", options: ["Unpaid", "Paid"] },
-      { key: "pickupStatus", label: "Pickup status", type: "select", options: ["Pending", "Collected"] },
+      // New pickups start Unpaid; the payment status can't be changed from the edit form.
+      {
+        key: "paymentStatus",
+        label: "Payment",
+        type: "select",
+        options: ["Unpaid", "Paid"],
+        required: true,
+        defaultValue: "Unpaid",
+        readOnly: (ctx) => ctx.isEdit,
+        // Same question the web console asks before a payment status changes.
+        confirmChange: (next, ctx) =>
+          ctx.isEdit ? null : { title: "Change payment status?", message: `Are you sure you want to change the payment status to ${next}?` },
+      },
+      // Every new pickup is Pending; it becomes Collected when collected bundles are recorded.
+      {
+        key: "pickupStatus",
+        label: "Pickup status",
+        type: "select",
+        options: ["Pending", "Collected"],
+        defaultValue: "Pending",
+        hidden: (ctx) => !ctx.isEdit,
+        readOnly: (ctx) => ctx.isEdit,
+      },
       {
         key: "collectedBundle",
         label: "Collected bundles",
         type: "number",
-        visibleWhen: (v) => v.pickupStatus === "Collected",
+        placeholder: "0",
+        blankWhenZero: true,
+        hint: "Saving collected bundles marks the pickup as Collected.",
+        hidden: (ctx) => !ctx.isEdit,
+        // Like the web console: once every bundle is collected the count is final.
+        readOnly: (ctx) =>
+          ctx.initial.pickupStatus === "Collected" && Number(ctx.initial.bundleCount) > 0 && Number(ctx.initial.collectedBundle) >= Number(ctx.initial.bundleCount),
       },
     ],
+    validate: (v, ctx) => {
+      if (!ctx.isEdit || !v.collectedBundle) return null;
+      const collected = Number(v.collectedBundle);
+      if (!(collected >= 1)) return "Collected bundles must be at least 1.";
+      if (collected > Number(v.bundleCount)) return `Collected bundles can't be more than the ${v.bundleCount} bundles assigned.`;
+      return null;
+    },
+    adjustPayload: (payload, ctx) => {
+      if (ctx.isEdit && Number(payload.collectedBundle) > 0) payload.pickupStatus = "Collected";
+    },
   },
   preBookings: {
     key: "preBookings",
@@ -326,7 +385,9 @@ export function docToFormValues(def: MasterDef, doc: BackendDoc | undefined): Re
   const values: Record<string, string> = {};
   for (const field of def.fields) {
     const raw = doc?.[field.key];
-    if (field.type === "password") values[field.key] = "";
+    if (!doc && field.defaultValue !== undefined) values[field.key] = field.defaultValue;
+    else if (field.blankWhenZero && Number(raw) === 0) values[field.key] = "";
+    else if (field.type === "password") values[field.key] = "";
     else if (field.type === "ref") values[field.key] = raw && typeof raw === "object" ? str((raw as { _id?: unknown })._id) : str(raw);
     else if (field.type === "date") values[field.key] = str(raw).slice(0, 10);
     else values[field.key] = str(raw);
@@ -335,26 +396,33 @@ export function docToFormValues(def: MasterDef, doc: BackendDoc | undefined): Re
 }
 
 /** Turns form values into a cargo-backend payload. */
-export function formValuesToPayload(def: MasterDef, values: Record<string, string>): Record<string, unknown> {
+const NEW_RECORD: FormContext = { isEdit: false, initial: {} };
+
+export function formValuesToPayload(def: MasterDef, values: Record<string, string>, ctx: FormContext = NEW_RECORD): Record<string, unknown> {
   const payload: Record<string, unknown> = {};
   for (const field of def.fields) {
     if (field.visibleWhen && !field.visibleWhen(values)) continue;
+    // Locked fields keep whatever the record already has.
+    if (field.readOnly?.(ctx)) continue;
     const value = values[field.key]?.trim() ?? "";
     // Blank optional fields (and a blank password on edit) are simply not sent.
     if (value === "") continue;
     payload[field.key] = field.type === "number" ? Number(value) : value;
   }
+  def.adjustPayload?.(payload, ctx);
   return payload;
 }
 
-export function validateForm(def: MasterDef, values: Record<string, string>, isEdit: boolean): string | null {
+export function validateForm(def: MasterDef, values: Record<string, string>, ctx: FormContext): string | null {
+  const isEdit = ctx.isEdit;
   for (const field of def.fields) {
     if (field.visibleWhen && !field.visibleWhen(values)) continue;
+    if (field.hidden?.(ctx) || field.readOnly?.(ctx)) continue;
     const value = values[field.key]?.trim() ?? "";
     if (field.required && !value && !(isEdit && field.optionalOnEdit)) return `${field.label} is required.`;
     if (value && field.type === "number" && !Number.isFinite(Number(value))) return `${field.label} must be a number.`;
     if (value && field.type === "email" && !/^\S+@\S+\.\S+$/.test(value)) return `${field.label} must be a valid email.`;
     if (value && field.type === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(value)) return `${field.label} must be in YYYY-MM-DD format.`;
   }
-  return null;
+  return def.validate?.(values, ctx) ?? null;
 }

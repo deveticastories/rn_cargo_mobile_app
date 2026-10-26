@@ -5,7 +5,7 @@
  */
 import { createSlice } from "@reduxjs/toolkit";
 import { errorMessage } from "@/api/client";
-import { MASTERS, formValuesToPayload, type MasterKey } from "@/features/masters/config";
+import { MASTERS, docToFormValues, formValuesToPayload, type MasterKey } from "@/features/masters/config";
 import { masterService } from "@/services/masterService";
 import { nextSequentialCode } from "@/services/mappers";
 import type { BackendDoc, LoadStatus } from "@/types";
@@ -40,7 +40,8 @@ export const saveMaster = createAppAsyncThunk(
   async (args: { key: MasterKey; id?: string; values: Record<string, string> }, { getState, rejectWithValue }) => {
     const def = MASTERS[args.key];
     try {
-      const payload = formValuesToPayload(def, args.values);
+      const doc = args.id ? getState().masters[args.key].items.find((d) => d._id === args.id) : undefined;
+      const payload = formValuesToPayload(def, args.values, { isEdit: Boolean(args.id), initial: docToFormValues(def, doc) });
       if (args.id) {
         await masterService.update(def, args.id, payload);
       } else {

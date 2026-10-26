@@ -47,7 +47,8 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "react-native-blob-util"
     ]
   }
 }

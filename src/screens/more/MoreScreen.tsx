@@ -3,7 +3,7 @@ import React, { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Constants from "expo-constants";
-import { ArrowLeftRight, ChartColumn, ChevronRight, LogOut, Repeat } from "lucide-react-native";
+import { ArrowLeftRight, ChartColumn, ChevronRight, LogOut, Repeat, Ship } from "lucide-react-native";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconTile, SectionTitle } from "@/components/primitives";
 import { LargeHeader, Screen } from "@/components/Screen";
@@ -76,6 +76,12 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
               </Card>
             );
           })}
+          <Card style={styles.gridItem} onPress={() => navigation.navigate("StuffedContainers")}>
+            <IconTile icon={Ship} tone="info" size={38} />
+            <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
+              Containers
+            </Txt>
+          </Card>
         </View>
 
         {/* Operations */}
@@ -195,7 +201,13 @@ function OpRow({
       <Txt size={15} weight="semibold" color={destructive ? t.tones.danger.fg : undefined} style={{ flex: 1, marginLeft: 12 }}>
         {label}
       </Txt>
-      {count ? <Badge label={String(count)} tone="warning" size="sm" /> : null}
+      {count ? (
+        <View style={[styles.count, { backgroundColor: t.tones.warning.bg }]}>
+          <Txt size={12} weight="bold" color={t.tones.warning.fg}>
+            {count}
+          </Txt>
+        </View>
+      ) : null}
       {!destructive && <ChevronRight size={18} color={t.textMuted} style={{ marginLeft: 8 }} />}
     </Pressable>
   );
@@ -207,6 +219,7 @@ const styles = StyleSheet.create({
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 10 },
   gridItem: { width: "31.5%", alignItems: "center", paddingVertical: 16, paddingHorizontal: 6 },
   opRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 14 },
+  count: { minWidth: 24, height: 24, paddingHorizontal: 7, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   account: { flexDirection: "row", alignItems: "center", gap: 10, alignSelf: "stretch", marginTop: 16, padding: 10, borderRadius: 14, borderWidth: 1 },
   accountAvatar: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 });

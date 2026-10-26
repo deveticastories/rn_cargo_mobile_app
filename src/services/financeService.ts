@@ -2,7 +2,7 @@
 import { api } from "@/api/client";
 import { API_ENDPOINTS } from "@/api/endpoints";
 import type { BackendDoc, CreditNoteEntry, DailyExpense, Invoice, ReceiptEntry } from "@/types";
-import { fallbackCode, listFrom, num, refField, refId, str } from "./mappers";
+import { fallbackCode, itemFrom, listFrom, num, refField, refId, str } from "./mappers";
 
 function toInvoice(doc: BackendDoc): Invoice {
   const charge = refField(doc.deliveryPartner, "charge");
@@ -78,6 +78,11 @@ export const financeService = {
     // This one nests a level deeper: `{ creditNotes: { creditNoteList, pettyCashBalance, ... } }`.
     const { data } = await api.get<{ creditNotes?: { creditNoteList?: BackendDoc[] } }>(API_ENDPOINTS.CREDIT_NOTES.BASE);
     return (data.creditNotes?.creditNoteList ?? []).map(toCreditNote);
+  },
+  /** cargo-backend works out every amount from the booking, its route price and the receiver's discount. */
+  async createInvoice(body: { containerId: string; bookingId: string; deliveryPartnerId: string }): Promise<Invoice> {
+    const { data } = await api.post(API_ENDPOINTS.INVOICES.BASE, { container: body.containerId, booking: body.bookingId, deliveryPartner: body.deliveryPartnerId });
+    return toInvoice(itemFrom(data, "data"));
   },
   async createExpense(body: { date: string; type: string; paymentType: string; amount: number; description?: string }) {
     await api.post(API_ENDPOINTS.DAILY_EXPENSES.BASE, {

@@ -52,6 +52,36 @@ export const sendToStuffing = createAppAsyncThunk("bookings/sendToStuffing", asy
   }
 });
 
+/**
+ * "Go to stuffing" for several bookings from the Ready to stuff list. Each one
+ * is tried; the list is re-read either way and any that failed are named.
+ */
+export const sendManyToStuffing = createAppAsyncThunk(
+  "bookings/sendManyToStuffing",
+  async (ids: string[], { dispatch, getState, rejectWithValue }) => {
+    const failed: string[] = [];
+    await Promise.all(
+      ids.map((id) =>
+        bookingService.updateStuffStatus(id, "Ready to Stuff").catch(() => {
+          failed.push(getState().bookings.items.find((b) => b.id === id)?.code ?? id);
+        })
+      )
+    );
+    await dispatch(fetchBookings());
+    if (failed.length) return rejectWithValue(`Couldn't move ${failed.join(", ")} to stuffing — please try again.`);
+  }
+);
+
+/** "Send back" — takes a booking off the stuffing queue, back to Ready to stuff. */
+export const sendBackFromStuffing = createAppAsyncThunk("bookings/sendBack", async (id: string, { rejectWithValue }) => {
+  try {
+    await bookingService.updateStuffStatus(id, "Pending");
+    return await bookingService.list();
+  } catch (err) {
+    return rejectWithValue(errorMessage(err, "Couldn't send the booking back."));
+  }
+});
+
 export const deleteBooking = createAppAsyncThunk("bookings/delete", async (id: string, { rejectWithValue }) => {
   try {
     await bookingService.remove(id);
@@ -83,7 +113,7 @@ const bookingsSlice = createSlice({
         state.items = payload.items;
       });
 
-    for (const thunk of [markReadyToShip, sendToStuffing] as const) {
+    for (const thunk of [markReadyToShip, sendToStuffing, sendBackFromStuffing] as const) {
       builder
         .addCase(thunk.pending, (state, { meta }) => {
           state.mutatingId = meta.arg;

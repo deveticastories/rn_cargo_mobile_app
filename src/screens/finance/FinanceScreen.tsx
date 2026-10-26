@@ -1,6 +1,6 @@
 /** 07 · Finance — invoices, receipts, expenses and petty cash. */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Modal, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ChartColumn, ChevronLeft, FileText, Plus, Receipt, Wallet, X } from "lucide-react-native";
 import { Button } from "@/components/Button";
@@ -315,7 +315,7 @@ function ExpenseSheet({ visible, onClose }: { visible: boolean; onClose: () => v
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.overlay }]} onPress={onClose} />
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1, justifyContent: "flex-end" }} pointerEvents="box-none">
+      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: "flex-end" }} pointerEvents="box-none">
         <View style={[styles.sheet, { backgroundColor: t.bg, paddingBottom: insets.bottom + 16 }]}>
           <View style={[styles.between, { marginBottom: 14, marginTop: 0 }]}>
             <Txt size={18} weight="bold">

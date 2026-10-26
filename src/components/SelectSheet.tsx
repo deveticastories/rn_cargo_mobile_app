@@ -3,7 +3,7 @@
  * receiver, transport, country and every other "pick one record" input.
  */
 import React, { useMemo, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, ChevronDown, Search, X } from "lucide-react-native";
 import { fonts, radius } from "@/theme/fonts";
@@ -28,9 +28,11 @@ interface SelectFieldProps {
   /** Formats the closed field, e.g. "Rahul Nair · Kochi". */
   display?: (opt: SelectOption) => string;
   emptyText?: string;
+  /** Shown in red under the field, which also gets a red border. */
+  error?: string | null;
 }
 
-export function SelectField({ label, placeholder = "Select", value, options, onChange, withAvatar, display, emptyText }: SelectFieldProps) {
+export function SelectField({ label, placeholder = "Select", value, options, onChange, withAvatar, display, emptyText, error }: SelectFieldProps) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
@@ -45,7 +47,7 @@ export function SelectField({ label, placeholder = "Select", value, options, onC
       <Pressable
         onPress={() => setOpen(true)}
         accessibilityRole="button"
-        style={[styles.field, { borderColor: t.border, backgroundColor: t.isDark ? t.surfaceAlt : t.surface }]}
+        style={[styles.field, { borderColor: error ? t.tones.danger.fg : t.border, backgroundColor: t.isDark ? t.surfaceAlt : t.surface }]}
       >
         {selected && withAvatar && <Avatar name={selected.label} size={28} />}
         <Txt size={15} weight="medium" color={selected ? t.text : t.textSoft} style={{ flex: 1 }} numberOfLines={1}>
@@ -53,6 +55,11 @@ export function SelectField({ label, placeholder = "Select", value, options, onC
         </Txt>
         <ChevronDown size={18} color={t.textMuted} />
       </Pressable>
+      {error ? (
+        <Txt size={12} color={t.tones.danger.fg} style={{ marginTop: 6 }}>
+          {error}
+        </Txt>
+      ) : null}
       <SelectSheet
         visible={open}
         title={label ?? placeholder}
@@ -101,7 +108,7 @@ export function SelectSheet({
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose} onShow={() => setQuery("")}>
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.overlay }]} onPress={onClose} />
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.sheetWrap} pointerEvents="box-none">
+      <KeyboardAvoidingView behavior="padding" style={styles.sheetWrap} pointerEvents="box-none">
         <View style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: insets.bottom + 12 }]}>
           <View style={[styles.grabber, { backgroundColor: t.borderStrong }]} />
           <View style={styles.sheetHeader}>

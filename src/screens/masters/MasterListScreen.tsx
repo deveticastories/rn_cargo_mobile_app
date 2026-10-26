@@ -1,7 +1,8 @@
 /** Generic list for any master/operations module (Team, Customers, Stores, Pickup assign, …). */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
-import { ChevronLeft, Plus, Search } from "lucide-react-native";
+import { ChevronLeft, Plus, Power, PowerOff, Search } from "lucide-react-native";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconButton, IconTile } from "@/components/primitives";
 import { EmptyView, LoadingView, Notice, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
@@ -21,6 +22,9 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
   const entry = useAppSelector((s) => s.masters[def.key]);
   const mutatingId = useAppSelector((s) => s.masters.mutatingId);
   const [query, setQuery] = useState("");
+  // The record whose Active / Inactive switch is waiting for confirmation.
+  const [toggling, setToggling] = useState<BackendDoc | null>(null);
+  const [toggleBusy, setToggleBusy] = useState(false);
 
   useEffect(() => {
     dispatch(fetchMaster(def.key));
@@ -37,18 +41,14 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
     return sorted.filter((d) => `${def.primary(d)} ${def.secondary(d)}`.toLowerCase().includes(q));
   }, [entry.items, query, def]);
 
-  const onToggle = (doc: BackendDoc) => {
-    const next = doc.status === false;
-    Alert.alert(`${next ? "Activate" : "Deactivate"} ${def.singular}?`, def.primary(doc), [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: next ? "Activate" : "Deactivate",
-        onPress: async () => {
-          const res = await dispatch(toggleMasterStatus({ key: def.key, id: doc._id, next }));
-          if (toggleMasterStatus.rejected.match(res)) Alert.alert("Couldn't update", res.payload ?? "Please try again.");
-        },
-      },
-    ]);
+  const activating = toggling?.status === false;
+  const confirmToggle = async () => {
+    if (!toggling) return;
+    setToggleBusy(true);
+    const res = await dispatch(toggleMasterStatus({ key: def.key, id: toggling._id, next: activating }));
+    setToggleBusy(false);
+    setToggling(null);
+    if (toggleMasterStatus.rejected.match(res)) Alert.alert("Couldn't update", res.payload ?? "Please try again.");
   };
 
   const onDelete = (doc: BackendDoc) =>
@@ -118,7 +118,7 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
                 <View style={{ alignItems: "flex-end", gap: 6 }}>
                   {extra && <Badge label={extra.label} tone={extra.tone} size="sm" />}
                   {def.hasStatus && (
-                    <Pressable onPress={() => onToggle(item)} hitSlop={6} accessibilityLabel="Toggle status">
+                    <Pressable onPress={() => setToggling(item)} hitSlop={6} accessibilityLabel="Toggle status">
                       <Badge label={item.status === false ? "Inactive" : "Active"} tone={item.status === false ? "neutral" : "success"} size="sm" />
                     </Pressable>
                   )}
@@ -131,6 +131,22 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
       <Txt size={11.5} soft align="center" style={{ paddingBottom: 10 }}>
         Tap to edit · long-press to delete{def.hasStatus ? " · tap status to toggle" : ""}
       </Txt>
+
+      <ConfirmDialog
+        visible={toggling !== null}
+        icon={activating ? Power : PowerOff}
+        tone={activating ? "success" : "warning"}
+        title={`${activating ? "Activate" : "Deactivate"} ${def.singular}?`}
+        message={
+          toggling
+            ? `${def.primary(toggling) || `This ${def.singular}`} will be marked ${activating ? "Active" : "Inactive"}.`
+            : undefined
+        }
+        confirmLabel="Confirm"
+        loading={toggleBusy}
+        onConfirm={confirmToggle}
+        onCancel={() => setToggling(null)}
+      />
     </Screen>
   );
 }

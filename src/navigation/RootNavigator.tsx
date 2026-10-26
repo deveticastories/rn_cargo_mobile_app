@@ -6,9 +6,13 @@
  *   ├─ Main  → bottom tabs           (signed in)
  *   │   ├─ Home
  *   │   ├─ Bookings
- *   │   ├─ Containers
- *   │   └─ More → stack: MoreHome · Finance · MasterList
+ *   │   ├─ Invoices        (web console's Invoicing: generate invoice)
+ *   │   ├─ DeliveryNotes   (web console's Invoicing: generate delivery note)
+ *   │   ├─ Stuffing
+ *   │   └─ More → stack: MoreHome · Finance · MasterList · StuffedContainers · StuffedContainer
  *   ├─ BookingDetail
+ *   ├─ Containers   (from the tab bar's + menu)
+ *   ├─ Repacking · ReadyToShip   (packing lists, from Booking detail)
  *   ├─ NewBooking   (modal)
  *   └─ MasterForm   (modal)
  *
@@ -32,10 +36,16 @@ import { BookingsScreen } from "@/screens/bookings/BookingsScreen";
 import { BookingDetailScreen } from "@/screens/bookings/BookingDetailScreen";
 import { NewBookingScreen } from "@/screens/bookings/NewBookingScreen";
 import { ContainersScreen } from "@/screens/containers/ContainersScreen";
+import { StuffingScreen } from "@/screens/stuffing/StuffingScreen";
+import { DeliveryNotesScreen } from "@/screens/invoicing/DeliveryNotesScreen";
+import { InvoicesScreen } from "@/screens/invoicing/InvoicesScreen";
+import { ReadyToShipScreen, RepackingScreen } from "@/screens/packing/BundleWorkspaceScreen";
 import { FinanceScreen } from "@/screens/finance/FinanceScreen";
 import { MoreScreen } from "@/screens/more/MoreScreen";
 import { MasterListScreen } from "@/screens/masters/MasterListScreen";
 import { MasterFormScreen } from "@/screens/masters/MasterFormScreen";
+import { StuffedContainerScreen } from "@/screens/stuffedContainers/StuffedContainerScreen";
+import { StuffedContainersScreen } from "@/screens/stuffedContainers/StuffedContainersScreen";
 import { TabBar } from "./TabBar";
 import type { MainTabParamList, MoreStackParamList, RootStackParamList } from "./types";
 
@@ -50,6 +60,8 @@ function MoreNavigator() {
       <MoreStack.Screen name="MoreHome" component={MoreScreen} />
       <MoreStack.Screen name="Finance" component={FinanceScreen} />
       <MoreStack.Screen name="MasterList" component={MasterListScreen} />
+      <MoreStack.Screen name="StuffedContainers" component={StuffedContainersScreen} />
+      <MoreStack.Screen name="StuffedContainer" component={StuffedContainerScreen} />
     </MoreStack.Navigator>
   );
 }
@@ -74,8 +86,12 @@ function MainTabs() {
   return (
     <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="Home" component={DashboardScreen} />
+      {/* Hidden for now — re-enable to bring the Bookings tab back. */}
       <Tabs.Screen name="Bookings" component={BookingsScreen} />
-      <Tabs.Screen name="Containers" component={ContainersScreen} />
+      {/* <Tabs.Screen name="Invoices" component={InvoicesScreen} /> */}
+      <Tabs.Screen name="DeliveryNotes" component={DeliveryNotesScreen} />
+      {/* Hidden for now — re-enable to bring the Stuffing tab back. */}
+      {/* <Tabs.Screen name="Stuffing" component={StuffingScreen} /> */}
       {/* Leaving the tab resets its stack, so tapping More again lands on the More screen. */}
       <Tabs.Screen name="More" component={MoreNavigator} options={{ popToTopOnBlur: true }} />
     </Tabs.Navigator>
@@ -113,6 +129,9 @@ export function RootNavigator() {
           <>
             <Stack.Screen name="Main" component={MainTabs} />
             <Stack.Screen name="BookingDetail" component={BookingDetailScreen} />
+            <Stack.Screen name="Containers" component={ContainersScreen} />
+            <Stack.Screen name="Repacking" component={RepackingScreen} />
+            <Stack.Screen name="ReadyToShip" component={ReadyToShipScreen} />
             <Stack.Screen
               name="NewBooking"
               component={NewBookingScreen}

@@ -1,8 +1,8 @@
 /** 05 · New booking — 3-step form with segmented controls and live charge hints. */
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ArrowRight, Info, Minus, Plus, Truck, X } from "lucide-react-native";
+import { ArrowRight, Info, Minus, Plus, X } from "lucide-react-native";
 import { Button } from "@/components/Button";
 import { DatePickerField } from "@/components/DatePickerField";
 import { Card, Chip, DashedDivider, IconButton } from "@/components/primitives";
@@ -19,11 +19,12 @@ import { createBooking } from "@/store/slices/bookingsSlice";
 import { fetchMaster } from "@/store/slices/mastersSlice";
 import { radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
-import type { BackendDoc, BillOption, BundleType, ProductType } from "@/types";
+import type { BackendDoc, BillOption, BundleType, ProductType, RepackingStatus } from "@/types";
 import { money, todayISO } from "@/utils/format";
 
 const STEP_TITLES = ["Pickup & date", "Shipment details", "Charges & review"] as const;
 const BUNDLE_TYPES: BundleType[] = ["Bundle", "Box", "CBM", "KG"];
+const PACKAGE_STATUSES: readonly RepackingStatus[] = ["Ready to Ship", "Repacking Required"];
 const ANY_PARTNER = "__latest__";
 
 /** cargo-backend requires every booking to reference a Pickup Assign; like the web form, link the newest one. */
@@ -52,6 +53,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
   const [billOption, setBillOption] = useState<BillOption>("With Bill");
   const [bundleType, setBundleType] = useState<BundleType>("Box");
   const [productType, setProductType] = useState<ProductType>("Normal");
+  const [packingStatus, setPackingStatus] = useState<RepackingStatus>("Ready to Ship");
   const [bundleCount, setBundleCount] = useState(1);
   const [brandCharge, setBrandCharge] = useState("");
   const [pickupCharge, setPickupCharge] = useState("");
@@ -126,6 +128,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
       billOption,
       bundleType,
       productType,
+      packingStatus,
       bundleCount,
       brandHandlingCharge: Number(brandCharge) || 0,
       pickupCharge: Number(pickupCharge) || 0,
@@ -135,7 +138,8 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
     const result = await dispatch(createBooking(input));
     setSaving(false);
     if (createBooking.fulfilled.match(result)) {
-      navigation.replace("BookingDetail", { id: result.payload.createdId });
+      // Done — close the modal and go back to where it was opened from.
+      navigation.goBack();
     } else {
       setError(result.payload ?? "Couldn't create the booking.");
     }
@@ -179,7 +183,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
         </View>
       </View>
 
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {error && <Notice message={error} tone="danger" />}
 
@@ -187,33 +191,6 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
             <>
               <DatePickerField label="Booking date" value={date} onChange={setDate} />
               <SelectField label="Pick up via" placeholder="Choose pickup" value={partner} options={partnerOptions} onChange={setPartner} />
-
-              <Card style={{ marginTop: 2 }}>
-                <View style={{ flexDirection: "row", gap: 12, alignItems: "center" }}>
-                  <Truck size={20} color={assign ? t.primary : t.tones.warning.fg} />
-                  <View style={{ flex: 1 }}>
-                    {assign ? (
-                      <>
-                        <Txt size={13} muted>
-                          Links to the latest pickup assign
-                        </Txt>
-                        <Txt size={15} weight="bold">
-                          LR {str(assign.lrNo)}
-                          <Txt size={13} muted>
-                            {"  "}
-                            {str(refField(assign.transport, "name"))} · {str(assign.bundleCount)} bundles
-                          </Txt>
-                        </Txt>
-                      </>
-                    ) : (
-                      <Txt size={13} color={t.tones.warning.fg}>
-                        No pickup assign found{partner === ANY_PARTNER ? "" : ` for ${partner}`}. Every booking must reference one.
-                      </Txt>
-                    )}
-                  </View>
-                </View>
-              </Card>
-              <Hint text="Direct-to-store drop-offs can't be booked yet — cargo-backend still requires a pickup assign." />
             </>
           )}
 
@@ -236,6 +213,9 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
               <Label text="Product type" />
               <Segmented options={["Branded", "Normal"] as const} value={productType} onChange={setProductType} />
               {showBrand && <Hint text="Branded goods carry a brand handling charge." />}
+
+              <Label text="Package status" />
+              <Segmented options={PACKAGE_STATUSES} value={packingStatus} onChange={setPackingStatus} />
 
               <Label text="Bundle count" />
               <View style={[styles.stepper, { borderColor: t.border, backgroundColor: t.surface }]}>
@@ -272,6 +252,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
                 <ReviewRow label="Date" value={date} />
                 <ReviewRow label="Pickup" value={assign ? `LR ${str(assign.lrNo)}` : "—"} />
                 <ReviewRow label="Shipment" value={`${bundleCount} × ${bundleType} · ${productType} · ${billOption}`} />
+                <ReviewRow label="Package status" value={packingStatus} />
                 <DashedDivider />
                 <View style={styles.reviewRow}>
                   <Txt size={14} weight="bold">

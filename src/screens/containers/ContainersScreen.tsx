@@ -1,12 +1,12 @@
 /** 06 · Containers — voyage tracker, cut-off warnings, load progress. */
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { FlatList, RefreshControl, ScrollView, StyleSheet, TextInput, View } from "react-native";
-import { Boxes, Search, Ship, X } from "lucide-react-native";
+import { Boxes, ChevronLeft, Search, Ship, X } from "lucide-react-native";
 import { Badge, Card, Chip, IconButton, IconTile, ProgressBar, Stat } from "@/components/primitives";
-import { EmptyView, LargeHeader, LoadingView, Notice, Screen } from "@/components/Screen";
+import { EmptyView, LoadingView, NavHeader, Notice, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
-import { useTabScrollReset } from "@/hooks/useTabScrollReset";
+import type { RootScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { containerPhase, selectBookingsPerContainer, voyageProgress, type ContainerPhase } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
@@ -30,7 +30,7 @@ function tabOf(phase: ContainerPhase): Tab {
 /** Days before cut-off over which the loading bar fills up. */
 const LOADING_WINDOW_DAYS = 14;
 
-export function ContainersScreen() {
+export function ContainersScreen({ navigation }: RootScreenProps<"Containers">) {
   const t = useTheme();
   const dispatch = useAppDispatch();
   const { items, status, error } = useAppSelector((s) => s.containers);
@@ -42,8 +42,6 @@ export function ContainersScreen() {
 
   const load = useCallback(() => Promise.all([dispatch(fetchContainers()), dispatch(fetchBookings())]), [dispatch]);
   const { refreshing, onRefresh } = useRefresh(load);
-  const listRef = useRef<FlatList<Container>>(null);
-  useTabScrollReset(listRef);
 
   const grouped = useMemo(() => {
     const groups: Record<Tab, Container[]> = { atSea: [], loading: [], stuffed: [] };
@@ -68,7 +66,8 @@ export function ContainersScreen() {
 
   return (
     <Screen>
-      <LargeHeader
+      <NavHeader
+        left={<IconButton icon={ChevronLeft} onPress={() => navigation.goBack()} accessibilityLabel="Back" />}
         title="Containers"
         right={
           <IconButton
@@ -109,7 +108,6 @@ export function ContainersScreen() {
         <LoadingView label="Loading containers…" />
       ) : (
         <FlatList
-          ref={listRef}
           data={data}
           keyExtractor={(c) => c.id}
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 30, flexGrow: 1 }}
@@ -118,7 +116,7 @@ export function ContainersScreen() {
             <>
               {error && <Notice message={error} onRetry={() => dispatch(fetchContainers())} />}
               {tab === "loading" && readyToStuff > 0 && (
-                <Notice message={`${readyToStuff} booking${readyToStuff === 1 ? " is" : "s are"} waiting to be stuffed — open one to load it into a container.`} />
+                <Notice message={`${readyToStuff} booking${readyToStuff === 1 ? " is" : "s are"} waiting to be stuffed — submit them from the Stuffing tab.`} />
               )}
             </>
           }

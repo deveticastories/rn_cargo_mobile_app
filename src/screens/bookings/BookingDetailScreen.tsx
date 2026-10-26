@@ -8,25 +8,36 @@ import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Avatar, Card, DashedDivider, IconButton, SectionTitle } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
-import { SelectSheet } from "@/components/SelectSheet";
 import { Txt } from "@/components/Txt";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import type { RootScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { bookingStage, STAGE_META, type BookingStage } from "@/store/selectors";
-import { deleteBooking, markReadyToShip, sendToStuffing } from "@/store/slices/bookingsSlice";
-import { loadIntoContainer } from "@/store/slices/containersSlice";
+import { bookingStage, STAGE_META } from "@/store/selectors";
+import { deleteBooking } from "@/store/slices/bookingsSlice";
 import { useTheme } from "@/theme/ThemeProvider";
-import type { Booking } from "@/types";
+import type { BackendDoc, Booking } from "@/types";
 import { fullDate, money, shortDate } from "@/utils/format";
 import { downloadInvoicePdf } from "@/utils/invoicePdf";
+import { downloadTablePdf } from "@/utils/tablePdf";
+import { str } from "@/services/mappers";
+import { packageService } from "@/services/packageService";
+import { fetchMaster } from "@/store/slices/mastersSlice";
 
-const STEPS: { key: BookingStage; label: string }[] = [
-  { key: "repacking", label: "Booked" },
-  { key: "ready", label: "Repacked" },
-  { key: "readyToStuff", label: "To stuff" },
-  { key: "stuffed", label: "Stuffed" },
-];
+/**
+ * Progress steps, following the web console's shipment pipeline (Repacking →
+ * Ready to ship → Stuffed). "Repacked" only appears for bookings that needed
+ * repacking. Each step is done or not; the first one not done is current.
+ */
+function progressSteps(b: Booking): { key: string; label: string; done: boolean }[] {
+  const packed = b.repackingStatus === "Ready to Ship";
+  const needsRepack = b.repackingStatus === "Repacking Required" || b.actualBundle > 0;
+  return [
+    { key: "booked", label: "Booked", done: true },
+    ...(needsRepack ? [{ key: "repacked", label: "Repacked", done: packed }] : []),
+    { key: "packageReady", label: "Package ready", done: packed && (b.packageListStatus === "Added" || b.stuffStatus === "Stuffed") },
+    { key: "stuffed", label: "Stuffed", done: b.stuffStatus === "Stuffed" },
+  ];
+}
 
 const digits = (phone?: string) => (phone ?? "").replace(/[^\d+]/g, "");
 
@@ -59,16 +70,16 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
   const dispatch = useAppDispatch();
   const booking = useAppSelector((s) => s.bookings.items.find((b) => b.id === route.params.id));
   const mutatingId = useAppSelector((s) => s.bookings.mutatingId);
-  const stuffingStatus = useAppSelector((s) => s.containers.stuffingStatus);
-  const containers = useAppSelector((s) => s.containers.items);
   const lookup = useCustomerLookup();
-  const [pickContainer, setPickContainer] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const invoice = useAppSelector((s) => s.finance.invoices.find((i) => i.bookingId === route.params.id));
   const [downloading, setDownloading] = useState(false);
+  const [sharingPdf, setSharingPdf] = useState(false);
+  const products = useAppSelector((s) => s.masters.products.items);
+  const fabrics = useAppSelector((s) => s.masters.fabrics.items);
   const [noInvoiceOpen, setNoInvoiceOpen] = useState(false);
 
   const back = <IconButton icon={ChevronLeft} onPress={() => navigation.goBack()} accessibilityLabel="Back" />;
@@ -83,13 +94,17 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
   }
 
   const stage = bookingStage(booking);
-  const stageIndex = STEPS.findIndex((s) => s.key === stage);
+  const steps = progressSteps(booking);
+  // Package list status not "Added" yet → finish the packing list on Ready to ship first.
+  const needsPackingList = booking.repackingStatus === "Ready to Ship" && booking.packageListStatus !== "Added";
+  const toPackageReady = { title: "Package ready", onPress: () => navigation.navigate("ReadyToShip", { bookingId: booking.id }) };
+  const currentIndex = steps.findIndex((s) => !s.done);
   const senderInfo = lookup.map.get(booking.sender.id);
   const receiverInfo = lookup.map.get(booking.receiver.id);
   const senderPlace = lookup.senderPlace(booking);
   const receiverPlace = lookup.receiverPlace(booking);
   const extra = booking.brandHandlingCharge + booking.pickupCharge + booking.bundleHandlingCharge;
-  const busy = mutatingId === booking.id || stuffingStatus === "loading";
+  const busy = mutatingId === booking.id;
 
   const run = async (action: () => Promise<{ meta: { requestStatus: string }; payload?: unknown }>) => {
     const result = await action();
@@ -114,6 +129,66 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
       Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(false);
+    }
+  };
+
+  /** Booking details and its package list as a PDF for the share sheet (no charges). */
+  const shareDetailsPdf = async () => {
+    const party = (name: string, place: string, phone?: string) => [name || "-", place, phone ? `Ph: ${phone}` : ""].filter(Boolean).join(", ");
+    setSharingPdf(true);
+    try {
+      // Product and fabric names come from their masters; load them if this session hasn't yet.
+      const [list, productItems, fabricItems] = await Promise.all([
+        packageService.getByBooking(booking.id),
+        products.length ? products : dispatch(fetchMaster("products")).unwrap().then((r) => r.items),
+        fabrics.length ? fabrics : dispatch(fetchMaster("fabrics")).unwrap().then((r) => r.items),
+      ]);
+      const nameOf = (items: BackendDoc[], id?: string) => (id ? str(items.find((x) => x._id === id)?.name) : "");
+      let totalQty = 0;
+      const packageRows = (list?.bundles ?? []).flatMap((b) =>
+        (b.lines.length ? b.lines : [null]).map((l, i) => {
+          totalQty += l?.quantity ?? 0;
+          return [
+            i === 0 ? String(b.bundleNo) : "",
+            l ? [nameOf(productItems, l.productId), nameOf(fabricItems, l.fabricId)].filter(Boolean).join(" - ") || "-" : "-",
+            l ? String(l.quantity || "") : "",
+            i === 0 && b.netWeight ? String(b.netWeight) : "",
+            i === 0 && b.grossWeight ? String(b.grossWeight) : "",
+          ];
+        })
+      );
+      await downloadTablePdf(`${booking.code}-details.pdf`, {
+        title: "BOOKING DETAILS",
+        info: [
+          ["Booking ID", booking.code],
+          ["Booking Date", fullDate(booking.date)],
+          ["Status", STAGE_META[bookingStage(booking)].label],
+          ["Sender", party(booking.sender.name, senderPlace, booking.sender.whatsapp || senderInfo?.whatsapp)],
+          ["Receiver", party(booking.receiver.name, receiverPlace, booking.receiver.whatsapp || receiverInfo?.whatsapp)],
+          ...(booking.pickupOption ? ([["Pickup LR", booking.pickupOption]] as [string, string][]) : []),
+        ],
+        head: ["Description", "Details"],
+        body: [
+          ["Bundles", `${booking.bundleCount}${booking.actualBundle ? ` (actual ${booking.actualBundle})` : ""}`],
+          ["Bundle type", booking.bundleType || "-"],
+          ["Product type", booking.productType || "-"],
+          ["Bill option", booking.billOption || "-"],
+          ["Package list status", booking.packageListStatus],
+        ],
+        sections: [
+          {
+            heading: "Package list",
+            head: ["Bundle No", "Products", "Qty", "Net wt (kg)", "Gross wt (kg)"],
+            body: packageRows,
+            foot: packageRows.length ? ["", "Total Qty", String(totalQty || ""), "", ""] : undefined,
+            emptyText: "No packing list saved yet.",
+          },
+        ],
+      });
+    } catch (e) {
+      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setSharingPdf(false);
     }
   };
 
@@ -143,28 +218,19 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
     void Linking.openURL(`tel:${n}`);
   };
 
-  const activeContainers = containers.filter((c) => c.status === "Active");
 
   const primary = (() => {
     switch (stage) {
+      // Repacking Required → the Repacking workspace builds its bundles and marks it Ready to Ship.
       case "repacking":
-        return {
-          title: "Mark ready to ship",
-          onPress: () =>
-            Alert.alert("Mark ready to ship?", "Confirm repacking is finished for this booking.", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Confirm", onPress: () => run(() => dispatch(markReadyToShip(booking.id))) },
-            ]),
-        };
+        return { title: "Repacking", onPress: () => navigation.navigate("Repacking", { bookingId: booking.id }) };
+      // Ready to Ship → every bundle needs a packing list (Ready to ship workspace) before it can go to stuffing.
+      // Packed and ready (or already queued): stuffing happens elsewhere, so just offer a way back.
       case "ready":
-        return { title: "Go to stuffing", onPress: () => run(() => dispatch(sendToStuffing(booking.id))) };
       case "readyToStuff":
-        return { title: "Load into container", onPress: () => setPickContainer(true) };
+        return needsPackingList ? toPackageReady : { title: "Go back", icon: undefined, onPress: () => navigation.goBack() };
       default:
-        return {
-          title: "View invoices",
-          onPress: () => navigation.navigate("Main", { screen: "More", params: { screen: "Finance", params: { tab: "invoices" }, initial: false } }),
-        };
+        return { title: "Download invoice", icon: Download, onPress: downloadInvoice, loading: downloading };
     }
   })();
 
@@ -189,13 +255,13 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
         {/* Progress timeline */}
         <Card style={{ marginTop: 6 }}>
           <View style={styles.timeline}>
-            {STEPS.map((step, i) => {
-              const done = i < stageIndex || stage === "stuffed";
-              const current = i === stageIndex && stage !== "stuffed";
+            {steps.map((step, i) => {
+              const done = step.done;
+              const current = i === currentIndex;
               return (
                 <React.Fragment key={step.key}>
-                  {i > 0 && <View style={[styles.connector, { backgroundColor: i <= stageIndex ? t.primary : t.border }]} />}
-                  <View style={{ alignItems: "center", width: 58 }}>
+                  {i > 0 && <View style={[styles.connector, { backgroundColor: done || current ? t.primary : t.border }]} />}
+                  <View style={{ alignItems: "center", width: 64 }}>
                     <View
                       style={[
                         styles.node,
@@ -206,7 +272,7 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
                     >
                       {done ? <Check size={13} color={t.onPrimary} strokeWidth={3} /> : current ? <View style={[styles.nodeDot, { backgroundColor: t.primary }]} /> : null}
                     </View>
-                    <Txt size={11} weight={current ? "bold" : "medium"} muted={!current && !done} style={{ marginTop: 6 }}>
+                    <Txt size={11} weight={current ? "bold" : "medium"} muted={!current && !done} align="center" style={{ marginTop: 6 }}>
                       {step.label}
                     </Txt>
                   </View>
@@ -272,29 +338,19 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
       {/* Next action */}
       <View style={[styles.bottomBar, { backgroundColor: t.surface, borderColor: t.border, paddingBottom: insets.bottom + 12 }]}>
         <IconButton
-          icon={downloading ? Loader : Download}
+          icon={sharingPdf ? Loader : Download}
           size={54}
-          onPress={downloading ? undefined : downloadInvoice}
-          accessibilityLabel="Download invoice PDF"
+          onPress={sharingPdf ? undefined : shareDetailsPdf}
+          accessibilityLabel="Share booking details as PDF"
         />
-        <Button title={primary.title} icon={ArrowRight} onPress={primary.onPress} loading={busy} style={{ flex: 1 }} />
+        <Button
+          title={primary.title}
+          icon={"icon" in primary ? primary.icon : ArrowRight}
+          onPress={primary.onPress}
+          loading={busy || ("loading" in primary && !!primary.loading)}
+          style={{ flex: 1 }}
+        />
       </View>
-
-      <SelectSheet
-        visible={pickContainer}
-        title="Load into container"
-        emptyText="No active containers. Create one on the web console first."
-        options={activeContainers.map((c) => ({
-          value: c.id,
-          label: c.code,
-          sublabel: [c.company, c.cutOffDate ? `Cut-off ${shortDate(c.cutOffDate)}` : ""].filter(Boolean).join(" · "),
-        }))}
-        onClose={() => setPickContainer(false)}
-        onSelect={(containerId) => {
-          setPickContainer(false);
-          void run(() => dispatch(loadIntoContainer({ containerId, bookingIds: [booking.id] })));
-        }}
-      />
 
       <ActionSheet
         visible={menuOpen}

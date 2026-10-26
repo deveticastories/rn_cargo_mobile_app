@@ -2,15 +2,16 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Check, Trash2, X } from "lucide-react-native";
+import { Check, Trash2, Wallet, X } from "lucide-react-native";
 import { Button } from "@/components/Button";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Chip, IconButton } from "@/components/primitives";
 import { NavHeader, Notice, Screen } from "@/components/Screen";
 import { Segmented } from "@/components/Segmented";
 import { SelectField } from "@/components/SelectSheet";
 import { TextField } from "@/components/TextField";
 import { Txt } from "@/components/Txt";
-import { MASTERS, docToFormValues, validateForm, type FieldDef } from "@/features/masters/config";
+import { MASTERS, docToFormValues, validateForm, type FieldDef, type FormContext } from "@/features/masters/config";
 import type { RootScreenProps } from "@/navigation/types";
 import { str } from "@/services/mappers";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
@@ -38,7 +39,11 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
     }
     return initial;
   });
+  // The record as loaded, so locked fields are decided by what's saved, not what's typed.
+  const ctx = useMemo<FormContext>(() => ({ isEdit, initial: docToFormValues(def, doc) }), [isEdit, def, doc]);
   const [error, setError] = useState<string | null>(null);
+  // An option change waiting for the user to confirm it.
+  const [pending, setPending] = useState<{ key: string; value: string; title: string; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -46,10 +51,19 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
   }, [dispatch, def]);
 
   const set = (key: string, value: string) => setValues((v) => ({ ...v, [key]: value }));
-  const visibleFields = useMemo(() => def.fields.filter((f) => !f.visibleWhen || f.visibleWhen(values)), [def, values]);
+  /** Picks an option, asking first when the field wants a confirmation. */
+  const choose = (f: FieldDef, value: string) => {
+    const ask = value !== values[f.key] ? f.confirmChange?.(value, ctx) : null;
+    if (ask) setPending({ key: f.key, value, ...ask });
+    else set(f.key, value);
+  };
+  const visibleFields = useMemo(
+    () => def.fields.filter((f) => (!f.visibleWhen || f.visibleWhen(values)) && !f.hidden?.(ctx)),
+    [def, values, ctx]
+  );
 
   const save = async () => {
-    const problem = validateForm(def, values, isEdit);
+    const problem = validateForm(def, values, ctx);
     setError(problem);
     if (problem) return;
     setSaving(true);
@@ -76,6 +90,9 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
   const renderField = (f: FieldDef) => {
     const label = f.required ? f.label : `${f.label} (optional)`;
     const value = values[f.key] ?? "";
+    if (f.readOnly?.(ctx)) {
+      return <TextField key={f.key} label={f.label} value={value || "—"} editable={false} hint="Can't be changed here." />;
+    }
     if (f.type === "select" && f.options) {
       if (f.options.length <= 3) {
         return (
@@ -83,7 +100,7 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
             <Txt size={13} weight="semibold" style={{ marginBottom: 7 }}>
               {label}
             </Txt>
-            <Segmented options={f.options} value={value} onChange={(v) => set(f.key, v)} />
+            <Segmented options={f.options} value={value} onChange={(v) => choose(f, v)} />
           </View>
         );
       }
@@ -95,14 +112,14 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
             </Txt>
             <View style={{ flexDirection: "row", flexWrap: "wrap", rowGap: 8 }}>
               {f.options.map((o) => (
-                <Chip key={o} label={o} active={value === o} onPress={() => set(f.key, value === o && !f.required ? "" : o)} />
+                <Chip key={o} label={o} active={value === o} onPress={() => choose(f, value === o && !f.required ? "" : o)} />
               ))}
             </View>
           </View>
         );
       }
       return (
-        <SelectField key={f.key} label={label} value={value} onChange={(v) => set(f.key, v)} options={f.options.map((o) => ({ value: o, label: o }))} />
+        <SelectField key={f.key} label={label} value={value} onChange={(v) => choose(f, v)} options={f.options.map((o) => ({ value: o, label: o }))} />
       );
     }
     if (f.type === "ref" && f.ref) {
@@ -128,7 +145,7 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
         keyboardType={f.type === "number" ? "numeric" : f.type === "phone" ? "phone-pad" : f.type === "email" ? "email-address" : "default"}
         autoCapitalize={f.type === "email" || f.type === "password" ? "none" : "sentences"}
         secureToggle={f.type === "password"}
-        hint={f.type === "password" && isEdit ? "Leave blank to keep the current password." : undefined}
+        hint={f.type === "password" && isEdit ? "Leave blank to keep the current password." : f.hint}
       />
     );
   };
@@ -140,7 +157,7 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
         title={`${isEdit ? "Edit" : "New"} ${def.singular}`}
         right={isEdit ? <IconButton icon={Trash2} onPress={remove} accessibilityLabel={`Delete ${def.singular}`} /> : undefined}
       />
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {isEdit && !doc && <Notice message="This record is no longer in the list — it may have been deleted." />}
           {error && <Notice message={error} tone="danger" />}
@@ -155,6 +172,20 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
           <Button title={isEdit ? "Save changes" : `Create ${def.singular}`} icon={Check} onPress={save} loading={saving} />
         </View>
       </KeyboardAvoidingView>
+
+      <ConfirmDialog
+        visible={pending !== null}
+        icon={Wallet}
+        tone="warning"
+        title={pending?.title ?? ""}
+        message={pending?.message}
+        confirmLabel="Confirm"
+        onConfirm={() => {
+          if (pending) set(pending.key, pending.value);
+          setPending(null);
+        }}
+        onCancel={() => setPending(null)}
+      />
     </Screen>
   );
 }
