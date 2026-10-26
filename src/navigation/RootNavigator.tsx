@@ -89,9 +89,9 @@ function MainTabs() {
       {/* Hidden for now — re-enable to bring the Bookings tab back. */}
       <Tabs.Screen name="Bookings" component={BookingsScreen} />
       {/* <Tabs.Screen name="Invoices" component={InvoicesScreen} /> */}
-      <Tabs.Screen name="DeliveryNotes" component={DeliveryNotesScreen} />
+      {/* <Tabs.Screen name="DeliveryNotes" component={DeliveryNotesScreen} /> */}
       {/* Hidden for now — re-enable to bring the Stuffing tab back. */}
-      {/* <Tabs.Screen name="Stuffing" component={StuffingScreen} /> */}
+      <Tabs.Screen name="Stuffing" component={StuffingScreen} />
       {/* Leaving the tab resets its stack, so tapping More again lands on the More screen. */}
       <Tabs.Screen name="More" component={MoreNavigator} options={{ popToTopOnBlur: true }} />
     </Tabs.Navigator>
