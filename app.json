@@ -51,6 +51,11 @@
       ],
       "react-native-blob-util",
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1719b5e1-88dc-4122-b1ab-2143be6984ad"
+      }
+    }
   }
 }
