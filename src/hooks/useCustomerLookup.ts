@@ -33,6 +33,7 @@ export function useCustomerLookup() {
       return [b.receiver.location || c?.location, b.receiver.country || c?.country].filter(Boolean).join(", ");
     };
     const receiverCity = (b: Booking) => b.receiver.location || map.get(b.receiver.id)?.location || b.receiver.country || "";
-    return { map, senderPlace, receiverPlace, receiverCity };
+    const receiverCountry = (b: Booking) => b.receiver.country || map.get(b.receiver.id)?.country || "";
+    return { map, senderPlace, receiverPlace, receiverCity, receiverCountry };
   }, [customers]);
 }

@@ -1,6 +1,7 @@
 import { combineReducers, configureStore, type UnknownAction } from "@reduxjs/toolkit";
 import { setSessionExpiredHandler } from "@/api/client";
 import { clearSession } from "@/storage/authStorage";
+import { cacheListener } from "./cache";
 import authReducer, { logout, sessionExpired } from "./slices/authSlice";
 import bookingsReducer from "./slices/bookingsSlice";
 import containersReducer from "./slices/containersSlice";
@@ -27,7 +28,10 @@ const rootReducer = (state: AppState | undefined, action: UnknownAction): AppSta
   return appReducer(state, action);
 };
 
-export const store = configureStore({ reducer: rootReducer });
+export const store = configureStore({
+  reducer: rootReducer,
+  middleware: (getDefault) => getDefault().prepend(cacheListener.middleware),
+});
 
 // The axios client reports rejected/expired tokens here.
 setSessionExpiredHandler(() => {

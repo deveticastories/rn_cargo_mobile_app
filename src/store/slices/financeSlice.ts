@@ -3,6 +3,7 @@ import { errorMessage } from "@/api/client";
 import { financeService } from "@/services/financeService";
 import type { CreditNoteEntry, DailyExpense, Invoice, LoadStatus, ReceiptEntry } from "@/types";
 import { createAppAsyncThunk } from "../thunk";
+import { cacheHydrated } from "../cacheActions";
 
 interface FinanceState {
   invoices: Invoice[];
@@ -66,6 +67,12 @@ const financeSlice = createSlice({
   initialState,
   reducers: {},
   extraReducers: (builder) => {
+    // Saved data from last time, only until this list has loaded from the server.
+    builder.addCase(cacheHydrated, (state, { payload }) => {
+      if (state.status === "succeeded" || !payload.finance) return;
+      Object.assign(state, payload.finance);
+    });
+
     builder
       .addCase(fetchFinance.pending, (state) => {
         state.status = "loading";

@@ -15,7 +15,8 @@ import { MASTERS, docToFormValues, validateForm, type FieldDef, type FormContext
 import type { RootScreenProps } from "@/navigation/types";
 import { str } from "@/services/mappers";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { deleteMaster, fetchMaster, saveMaster } from "@/store/slices/mastersSlice";
+import { deleteMaster, saveMaster } from "@/store/slices/mastersSlice";
+import { ensureMaster } from "@/store/ensure";
 import type { RootState } from "@/store";
 import { useTheme } from "@/theme/ThemeProvider";
 import { todayISO } from "@/utils/format";
@@ -47,7 +48,7 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    def.dependsOn?.forEach((k) => dispatch(fetchMaster(k)));
+    def.dependsOn?.forEach((k) => dispatch(ensureMaster(k)));
   }, [dispatch, def]);
 
   const set = (key: string, value: string) => setValues((v) => ({ ...v, [key]: value }));
@@ -92,6 +93,9 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
     const value = values[f.key] ?? "";
     if (f.readOnly?.(ctx)) {
       return <TextField key={f.key} label={f.label} value={value || "—"} editable={false} hint="Can't be changed here." />;
+    }
+    if (f.finalValue && value === f.finalValue) {
+      return <TextField key={f.key} label={f.label} value={value} editable={false} hint="Can't be changed back once confirmed." />;
     }
     if (f.type === "select" && f.options) {
       if (f.options.length <= 3) {

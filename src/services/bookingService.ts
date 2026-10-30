@@ -37,7 +37,7 @@ export function toBooking(doc: BackendDoc): Booking {
 export interface BookingInput {
   senderId: string;
   receiverId: string;
-  pickupAssignId: string;
+  pickupAssignId?: string;
   date: string;
   billOption: "With Bill" | "Without Bill";
   bundleType: "Bundle" | "Box" | "CBM" | "KG";

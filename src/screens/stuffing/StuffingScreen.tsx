@@ -1,34 +1,39 @@
 /**
- * Stuffing — the web console's two pages in one tab:
+ * Stuffing — the web console's stuffing pages in one tab:
  *   Ready to stuff: fully packed bookings; select some and "Go to stuffing".
  *   Stuffing: the queue sent from Ready to stuff; pick a container, select
  *   bookings and "Submit stuffing" (or send one back).
- * The header's download button exports the stuffed list as a PDF, like the web's.
+ *   Stuffed list: every stuffing (container, bookings, date), downloadable as a PDF.
  */
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from "react-native";
-import { ArrowLeftRight, Check, Download, Search, Undo2, X } from "lucide-react-native";
+import { ArrowLeftRight, Check, Download, FileText, Package, Search, Undo2, X } from "lucide-react-native";
 import { Button } from "@/components/Button";
-import { Chip, IconButton } from "@/components/primitives";
+import { Card, Chip } from "@/components/primitives";
 import { EmptyView, LargeHeader, LoadingView, Notice, Screen } from "@/components/Screen";
 import { SelectField } from "@/components/SelectSheet";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
+import { packageService } from "@/services/packageService";
+import { str } from "@/services/mappers";
+import { ensureMaster } from "@/store/ensure";
 import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { TabScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { selectAwaitingStuffing, selectPackingByBooking, selectReadyToStuff, selectStuffableContainers } from "@/store/selectors";
 import { fetchBookings, sendBackFromStuffing, sendManyToStuffing } from "@/store/slices/bookingsSlice";
 import { fetchContainers, loadIntoContainer } from "@/store/slices/containersSlice";
+import { fetchFinance } from "@/store/slices/financeSlice";
+import { DownloadTile, StuffedListView } from "@/screens/stuffedContainers/StuffedListView";
 import { fonts, radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Booking } from "@/types";
 import { fullDate, shortDate } from "@/utils/format";
 import { downloadTablePdf } from "@/utils/tablePdf";
 
-type Tab = "ready" | "stuffing";
+type Tab = "ready" | "stuffing" | "stuffed";
 
-const TAB_LABEL: Record<Tab, string> = { ready: "Ready to stuff", stuffing: "Stuffing" };
+const TAB_LABEL: Record<Tab, string> = { ready: "Ready to stuff", stuffing: "Stuffing", stuffed: "Stuffed list" };
 
 const bundlesOf = (b: Booking) => b.actualBundle || b.bundleCount;
 
@@ -39,24 +44,31 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
   const awaiting = useAppSelector(selectAwaitingStuffing);
   const packing = useAppSelector(selectPackingByBooking);
   const stuffable = useAppSelector(selectStuffableContainers);
-  const { items: containers, stuffings, status, error, stuffingStatus } = useAppSelector((s) => s.containers);
+  const { stuffings, status, error, stuffingStatus } = useAppSelector((s) => s.containers);
   const bookingsStatus = useAppSelector((s) => s.bookings.status);
   const mutatingId = useAppSelector((s) => s.bookings.mutatingId);
 
+  // Product, fabric and pricing names for the Stuffed list's booking details.
+  useEffect(() => {
+    dispatch(ensureMaster("products"));
+    dispatch(ensureMaster("fabrics"));
+    dispatch(ensureMaster("pricing"));
+  }, [dispatch]);
+
   const [tab, setTab] = useState<Tab>("ready");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Record<Tab, string[]>>({ ready: [], stuffing: [] });
+  const [selected, setSelected] = useState<Record<Tab, string[]>>({ ready: [], stuffing: [], stuffed: [] });
   const [containerId, setContainerId] = useState("");
   const [moving, setMoving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  const [downloading, setDownloading] = useState<string | null>(null);
 
-  const load = useCallback(() => Promise.all([dispatch(fetchContainers()), dispatch(fetchBookings())]), [dispatch]);
+  const load = useCallback(() => Promise.all([dispatch(fetchContainers()), dispatch(fetchBookings()), dispatch(fetchFinance())]), [dispatch]);
   const { refreshing, onRefresh } = useRefresh(load);
   const listRef = useRef<FlatList<Booking>>(null);
   useTabScrollReset(listRef);
 
-  const source = tab === "ready" ? ready : awaiting;
+  const source = tab === "ready" ? ready : tab === "stuffing" ? awaiting : [];
   const data = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? source.filter((b) => [b.code, b.sender.name, b.receiver.name].join(" ").toLowerCase().includes(q)) : source;
@@ -99,38 +111,103 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
     setContainerId("");
   };
 
-  const sendBack = async (b: Booking) => {
-    setActionError(null);
-    const result = await dispatch(sendBackFromStuffing(b.id));
-    if (sendBackFromStuffing.rejected.match(result)) setActionError(result.payload ?? "Couldn't send the booking back.");
-  };
+  // Ready to stuff downloads cover the ticked bookings only.
+  const readyScope = ready.filter((b) => picked.includes(b.id));
+  const packages = useAppSelector((s) => s.containers.packages);
+  const products = useAppSelector((s) => s.masters.products.items);
+  /** Bundle mark of each saved bundle: every bundle across all packing lists numbered in id order, like the web. */
+  const markOf = useMemo(() => {
+    const ids = packages.flatMap((p) => p.bundles.map((x) => x.id)).filter(Boolean).sort();
+    return new Map(ids.map((id, i) => [id, i + 1]));
+  }, [packages]);
 
-  /** The web's "Stuffed list" PDF: one row per stuffing, newest first. */
-  const downloadStuffedList = async () => {
-    if (stuffings.length === 0) return Alert.alert("Nothing to download", "Nothing has been stuffed yet.");
-    const rows = [...stuffings].sort((a, b) => b.date.localeCompare(a.date));
-    const totalBookings = rows.reduce((n, st) => n + st.bookings.length, 0);
-    setDownloading(true);
+  /** Container packing list: one row per product line with its bundle mark, quantity and the bundle's weights. */
+  const downloadContainerPackingList = async () => {
+    const list = readyScope;
+    if (list.length === 0) return;
+    setDownloading("containerPacking");
     try {
-      await downloadTablePdf("stuffed-list.pdf", {
-        title: "STUFFED LIST",
+      const lists = await Promise.all(list.map((b) => packageService.getByBooking(b.id).catch(() => null)));
+      const productName = (id?: string) => (id ? str(products.find((p) => p._id === id)?.name) : "") || "-";
+      const bundles = lists
+        .flatMap((l) => l?.bundles ?? [])
+        .map((bundle) => ({ bundle, mark: markOf.get(bundle.id) ?? 0 }))
+        .sort((a, b) => a.mark - b.mark);
+      let qty = 0;
+      let net = 0;
+      let gross = 0;
+      const body = bundles.flatMap(({ bundle, mark }, n) => {
+        net += bundle.netWeight || 0;
+        gross += bundle.grossWeight || 0;
+        const lines = bundle.lines.length ? bundle.lines : [{ productId: "", quantity: 0 }];
+        // Mark and weights belong to the bundle, so they print on its first product line only.
+        return lines.map((l, i) => {
+          qty += Number(l.quantity) || 0;
+          return [
+            i === 0 ? String(n + 1) : "",
+            i === 0 ? (mark ? String(mark) : "-") : "",
+            productName(l.productId),
+            l.quantity ? String(l.quantity) : "-",
+            i === 0 ? `${bundle.netWeight || 0} kg` : "",
+            i === 0 ? `${bundle.grossWeight || 0} kg` : "",
+          ];
+        });
+      });
+      await downloadTablePdf("container-packing-list.pdf", {
+        title: "CONTAINER PACKING LIST",
         info: [
-          ["No. of Containers", String(rows.length)],
-          ["No. of Bookings", String(totalBookings)],
+          ["No. of Bookings", String(list.length)],
+          ["No. of Bundles", String(bundles.length)],
           ["Generated On", fullDate(new Date().toISOString())],
         ],
-        head: ["Sl No", "Container ID", "Container Name", "No. of Bookings", "Stuffed Date"],
-        body: rows.map((st, i) => {
-          const c = containers.find((x) => x.id === st.container);
-          return [String(i + 1), c?.code ?? "-", c?.company ?? "-", String(st.bookings.length), st.date ? fullDate(st.date) : "-"];
-        }),
-        foot: ["", "", "Total", String(totalBookings), ""],
+        head: ["Sl No", "Bundle Mark", "Product Name", "Quantity", "N.Wt", "Gr.Wt"],
+        body,
+        foot: ["", "", "Total", String(qty), `${Math.round(net * 100) / 100} kg`, `${Math.round(gross * 100) / 100} kg`],
       });
     } catch (e) {
       Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
+  };
+
+  /** Ready to stuff list: booking, sender, receiver, bundle count, bundle marks and booking date. */
+  const downloadReadyList = async () => {
+    const list = readyScope;
+    if (list.length === 0) return;
+    const total = list.reduce((n, b) => n + bundlesOf(b), 0);
+    setDownloading("readyList");
+    try {
+      await downloadTablePdf("ready-to-stuff.pdf", {
+        title: "READY TO STUFF",
+        info: [
+          ["No. of Bookings", String(list.length)],
+          ["No. of Bundles", String(total)],
+          ["Generated On", fullDate(new Date().toISOString())],
+        ],
+        head: ["Sl No", "Booking ID", "Sender", "Receiver", "Bundle Count", "Bundle Mark", "Booking Date"],
+        body: list.map((b, i) => [
+          String(i + 1),
+          b.code,
+          b.sender.name || "-",
+          b.receiver.name || "-",
+          String(bundlesOf(b)),
+          packing.get(b.id)?.marks.join(", ") || "-",
+          fullDate(b.date),
+        ]),
+        foot: ["", "", "", "Total", String(total), "", ""],
+      });
+    } catch (e) {
+      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const sendBack = async (b: Booking) => {
+    setActionError(null);
+    const result = await dispatch(sendBackFromStuffing(b.id));
+    if (sendBackFromStuffing.rejected.match(result)) setActionError(result.payload ?? "Couldn't send the booking back.");
   };
 
   const loading = (status === "loading" || bookingsStatus === "loading") && source.length === 0;
@@ -139,20 +216,12 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
 
   return (
     <Screen>
-      <LargeHeader
-        title="Stuffing"
-        right={
-          downloading ? (
-            <ActivityIndicator color={t.primary} style={{ width: 40 }} />
-          ) : (
-            <IconButton icon={Download} onPress={downloadStuffedList} accessibilityLabel="Download stuffed list PDF" />
-          )
-        }
-      />
+      <LargeHeader title="Stuffing" />
       <View>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           <Chip label={TAB_LABEL.ready} count={ready.length} active={tab === "ready"} onPress={() => switchTab("ready")} />
           <Chip label={TAB_LABEL.stuffing} count={awaiting.length} active={tab === "stuffing"} onPress={() => switchTab("stuffing")} />
+          <Chip label={TAB_LABEL.stuffed} count={stuffings.length} active={tab === "stuffed"} onPress={() => switchTab("stuffed")} />
         </ScrollView>
       </View>
       <View style={{ paddingHorizontal: 20, marginBottom: 8 }}>
@@ -161,7 +230,7 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
           <TextInput
             value={query}
             onChangeText={setQuery}
-            placeholder="Search booking ID, sender, receiver"
+            placeholder={tab === "stuffed" ? "Search container or booking ID" : "Search booking ID, sender, receiver"}
             placeholderTextColor={t.textSoft}
             style={[styles.searchInput, { color: t.text }]}
             autoCorrect={false}
@@ -175,7 +244,9 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
         </View>
       </View>
 
-      {loading ? (
+      {tab === "stuffed" ? (
+        <StuffedListView query={query} refreshing={refreshing} onRefresh={onRefresh} />
+      ) : loading ? (
         <LoadingView label="Loading stuffing…" />
       ) : (
         <FlatList
@@ -198,17 +269,47 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
                   emptyText="No containers free for stuffing. Create one on the web console first."
                 />
               )}
+              {tab === "ready" && data.length > 0 && (
+                <Card style={{ marginBottom: 6 }} padded={false}>
+                  <View style={{ padding: 12 }}>
+                    <View style={styles.downloadsHead}>
+                      <Txt size={14} weight="bold">
+                        Downloads
+                      </Txt>
+                      <Txt size={12.5} muted>
+                        {picked.length ? `${picked.length} selected` : "Select bookings below"}
+                      </Txt>
+                    </View>
+                    <View style={styles.downloads}>
+                      <DownloadTile
+                        icon={Package}
+                        title="Container packing list"
+                        note="Mark, product, qty, weights"
+                        onPress={downloadContainerPackingList}
+                        busy={downloading === "containerPacking"}
+                        disabled={picked.length === 0 || downloading !== null}
+                      />
+                      <DownloadTile
+                        icon={FileText}
+                        title="Download PDF"
+                        note="Bookings, bundles, marks, dates"
+                        onPress={downloadReadyList}
+                        busy={downloading === "readyList"}
+                        disabled={picked.length === 0 || downloading !== null}
+                      />
+                    </View>
+                  </View>
+                </Card>
+              )}
               {data.length > 0 && (
                 <View style={styles.listHead}>
                   <Txt size={13} weight="semibold" muted>
-                    {tab === "ready"
-                      ? `${data.length} booking${data.length === 1 ? "" : "s"} · ${totalBundles} bundles`
-                      : "Bookings sent from Ready to stuff"}
+                    {tab === "ready" ? `${data.length} booking${data.length === 1 ? "" : "s"} · ${totalBundles} bundles` : ""}
                   </Txt>
                   <Pressable onPress={toggleAll} hitSlop={8} style={styles.selectAll} accessibilityRole="checkbox" accessibilityState={{ checked: allPicked }}>
                     <Checkbox checked={allPicked} />
                     <Txt size={13} weight="semibold">
-                      Select all
+                      {allPicked ? "Deselect all" : "Select all"}
                     </Txt>
                   </Pressable>
                 </View>
@@ -239,7 +340,7 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
         />
       )}
 
-      {source.length > 0 && (
+      {tab !== "stuffed" && source.length > 0 && (
         <View style={[styles.footer, { backgroundColor: t.bg, borderTopColor: t.border, paddingBottom: 12 }]}>
           {tab === "ready" ? (
             <Button
@@ -351,4 +452,6 @@ const styles = StyleSheet.create({
   rowTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   sendBack: { flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start", marginTop: 8 },
   footer: { paddingHorizontal: 20, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
+  downloadsHead: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  downloads: { gap: 8 },
 });

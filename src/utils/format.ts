@@ -1,7 +1,7 @@
-/** Formatting helpers shared across screens (Indian number grouping, short dates, initials). */
+/** Formatting helpers shared across screens (AED amounts, short dates, initials). */
 
 export const money = (n: number | string | undefined): string =>
-  `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  `AED ${Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
 
 export const todayISO = (): string => {
   const d = new Date();

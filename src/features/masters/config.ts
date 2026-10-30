@@ -57,6 +57,8 @@ export interface FieldDef {
   hidden?: (ctx: FormContext) => boolean;
   /** Shown but locked in this context; its value is never sent. */
   readOnly?: (ctx: FormContext) => boolean;
+  /** Once the select is set to this value it can't be switched back (still sent on save). */
+  finalValue?: string;
   /** A stored 0 shows as an empty box, so a number can be typed straight in. */
   blankWhenZero?: boolean;
   /** Help text under the field. */
@@ -96,7 +98,13 @@ export interface MasterDef {
   validate?: (values: Record<string, string>, ctx: FormContext) => string | null;
   /** Last tweaks to the payload before it's sent. */
   adjustPayload?: (payload: Record<string, unknown>, ctx: FormContext) => void;
+  /** Whether a record may be deleted (default: always). */
+  canDelete?: (doc: BackendDoc) => boolean;
 }
+
+/** Pickup assigns: "Collected" with every assigned bundle collected — the count is final. */
+export const pickupFullyCollected = (d: BackendDoc) =>
+  d.pickupStatus === "Collected" && Number(d.collectedBundle ?? 0) >= Number(d.bundleCount ?? 0);
 
 const name = (doc: BackendDoc) => str(doc.name);
 const join = (...parts: unknown[]) => parts.filter((p) => p !== undefined && p !== null && p !== "").map(String).join(" · ");
@@ -278,7 +286,15 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     hasStatus: true,
     dependsOn: ["pickupPartners"],
     primary: (d) => `LR ${str(d.lrNo)}`,
-    secondary: (d) => join(str(refField(d.transport, "name")), `${str(d.bundleCount)} bundles`, money(Number(d.amount ?? 0)), d.paymentStatus),
+    secondary: (d) =>
+      join(
+        str(refField(d.transport, "name")),
+        d.pickupStatus === "Collected"
+          ? `${str(d.collectedBundle ?? 0)}/${str(d.bundleCount)} collected · balance ${Math.max(0, Number(d.bundleCount ?? 0) - Number(d.collectedBundle ?? 0))}`
+          : `${str(d.bundleCount)} bundles`,
+        money(Number(d.amount ?? 0)),
+        d.paymentStatus
+      ),
     badge: (d) =>
       d.pickupStatus ? { label: str(d.pickupStatus), tone: d.pickupStatus === "Collected" ? "success" : "warning" } : null,
     fields: [
@@ -286,7 +302,7 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
       { key: "lrNo", label: "LR No", type: "text", required: true },
       { key: "bundleCount", label: "Bundle count", type: "number", required: true },
       { key: "amount", label: "Amount", type: "number", required: true },
-      // New pickups start Unpaid; the payment status can't be changed from the edit form.
+      // New pickups start Unpaid. An Unpaid pickup can still be marked Paid when edited; once Paid it's locked.
       {
         key: "paymentStatus",
         label: "Payment",
@@ -294,44 +310,17 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
         options: ["Unpaid", "Paid"],
         required: true,
         defaultValue: "Unpaid",
-        readOnly: (ctx) => ctx.isEdit,
+        readOnly: (ctx) => ctx.isEdit && ctx.initial.paymentStatus === "Paid",
+        finalValue: "Paid",
         // Same question the web console asks before a payment status changes.
-        confirmChange: (next, ctx) =>
-          ctx.isEdit ? null : { title: "Change payment status?", message: `Are you sure you want to change the payment status to ${next}?` },
+        confirmChange: (next) => ({ title: "Change payment status?", message: `Are you sure you want to change the payment status to ${next}?` }),
       },
-      // Every new pickup is Pending; it becomes Collected when collected bundles are recorded.
-      {
-        key: "pickupStatus",
-        label: "Pickup status",
-        type: "select",
-        options: ["Pending", "Collected"],
-        defaultValue: "Pending",
-        hidden: (ctx) => !ctx.isEdit,
-        readOnly: (ctx) => ctx.isEdit,
-      },
-      {
-        key: "collectedBundle",
-        label: "Collected bundles",
-        type: "number",
-        placeholder: "0",
-        blankWhenZero: true,
-        hint: "Saving collected bundles marks the pickup as Collected.",
-        hidden: (ctx) => !ctx.isEdit,
-        // Like the web console: once every bundle is collected the count is final.
-        readOnly: (ctx) =>
-          ctx.initial.pickupStatus === "Collected" && Number(ctx.initial.bundleCount) > 0 && Number(ctx.initial.collectedBundle) >= Number(ctx.initial.bundleCount),
-      },
+      // Pickup status isn't on the form: like the web console, it's set from the list by recording collected bundles.
     ],
-    validate: (v, ctx) => {
-      if (!ctx.isEdit || !v.collectedBundle) return null;
-      const collected = Number(v.collectedBundle);
-      if (!(collected >= 1)) return "Collected bundles must be at least 1.";
-      if (collected > Number(v.bundleCount)) return `Collected bundles can't be more than the ${v.bundleCount} bundles assigned.`;
-      return null;
-    },
     adjustPayload: (payload, ctx) => {
-      if (ctx.isEdit && Number(payload.collectedBundle) > 0) payload.pickupStatus = "Collected";
+      if (!ctx.isEdit) payload.pickupStatus = "Pending";
     },
+    canDelete: (d) => d.pickupStatus !== "Collected",
   },
   preBookings: {
     key: "preBookings",

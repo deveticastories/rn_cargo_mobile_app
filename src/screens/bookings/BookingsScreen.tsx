@@ -11,8 +11,9 @@ import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { BookingFilter, TabScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { bookingStage, selectBookingStats, selectBookingsSorted } from "@/store/selectors";
+import { bookingListTab, bookingStage, LIST_TAB_META, packedProgress, STAGE_META, selectBookingsSorted, selectPackingByBooking } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
+import { fetchContainers } from "@/store/slices/containersSlice";
 import { fetchMaster } from "@/store/slices/mastersSlice";
 import { fonts, radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -22,19 +23,11 @@ import { parseDate } from "@/utils/format";
 type SortKey = "newest" | "oldest" | "bundles";
 const SORT_LABELS: Record<SortKey, string> = { newest: "Newest first", oldest: "Oldest first", bundles: "Most bundles" };
 
-function matchesFilter(b: Booking, filter: BookingFilter): boolean {
-  if (filter === "all") return true;
-  const stage = bookingStage(b);
-  // "Ready" covers everything ready to ship that isn't stuffed yet, including bookings already queued for stuffing.
-  if (filter === "ready") return stage === "ready" || stage === "readyToStuff";
-  return stage === filter;
-}
-
 export function BookingsScreen({ navigation, route }: TabScreenProps<"Bookings">) {
   const t = useTheme();
   const dispatch = useAppDispatch();
   const sorted = useAppSelector(selectBookingsSorted);
-  const stats = useAppSelector(selectBookingStats);
+  const packing = useAppSelector(selectPackingByBooking);
   const { status, error } = useAppSelector((s) => s.bookings);
   const lookup = useCustomerLookup();
 
@@ -48,14 +41,19 @@ export function BookingsScreen({ navigation, route }: TabScreenProps<"Bookings">
     if (route.params?.filter) setFilter(route.params.filter);
   }, [route.params?.filter]);
 
-  const load = useCallback(() => Promise.all([dispatch(fetchBookings()), dispatch(fetchMaster("customers"))]), [dispatch]);
+  const load = useCallback(
+    () => Promise.all([dispatch(fetchBookings()), dispatch(fetchContainers()), dispatch(fetchMaster("customers"))]),
+    [dispatch]
+  );
   const { refreshing, onRefresh } = useRefresh(load);
   const listRef = useRef<FlatList<Booking>>(null);
   useTabScrollReset(listRef);
 
+  const tabOf = useMemo(() => new Map(sorted.map((b) => [b.id, bookingListTab(b, packing)])), [sorted, packing]);
+
   const data = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = sorted.filter((b) => matchesFilter(b, filter));
+    let list = filter === "all" ? sorted : sorted.filter((b) => tabOf.get(b.id) === filter);
     if (q) {
       list = list.filter((b) =>
         [b.code, b.sender.name, b.receiver.name, lookup.senderPlace(b), lookup.receiverPlace(b), b.pickupOption]
@@ -69,14 +67,15 @@ export function BookingsScreen({ navigation, route }: TabScreenProps<"Bookings">
     if (sort === "newest") return [...list].sort((a, b) => time(b) - time(a));
     if (sort === "oldest") return [...list].reverse().sort((a, b) => time(a) - time(b));
     return [...list].sort((a, b) => (b.actualBundle || b.bundleCount) - (a.actualBundle || a.bundleCount));
-  }, [sorted, filter, query, sort, lookup]);
+  }, [sorted, tabOf, filter, query, sort, lookup]);
 
+  const count = (tab: BookingFilter) => [...tabOf.values()].filter((v) => v === tab).length;
   const chips: { key: BookingFilter; label: string; count: number }[] = [
-    { key: "all", label: "All", count: stats.total },
-    { key: "repacking", label: "Repacking", count: stats.counts.repacking },
-    { key: "ready", label: "Ready", count: stats.counts.ready + stats.counts.readyToStuff },
-    { key: "readyToStuff", label: "To stuff", count: stats.counts.readyToStuff },
-    { key: "stuffed", label: "Stuffed", count: stats.counts.stuffed },
+    { key: "all", label: "All", count: sorted.length },
+    { key: "packingList", label: "Packing list", count: count("packingList") },
+    { key: "readyToStuff", label: "Ready to stuff", count: count("readyToStuff") },
+    { key: "stuffing", label: "Stuffing", count: count("stuffing") },
+    { key: "stuffed", label: "Stuffed", count: count("stuffed") },
   ];
 
   return (
@@ -133,6 +132,9 @@ export function BookingsScreen({ navigation, route }: TabScreenProps<"Bookings">
               booking={item}
               senderPlace={lookup.senderPlace(item)}
               receiverPlaceText={lookup.receiverPlace(item)}
+              packed={tabOf.get(item.id) === "packingList" ? packedProgress(item, packing) : undefined}
+              // Packing list cards show the pack status (Repacking required / Package ready); the others show their tab.
+              status={tabOf.get(item.id) === "packingList" ? STAGE_META[bookingStage(item)] : LIST_TAB_META[tabOf.get(item.id) ?? bookingListTab(item, packing)]}
               onPress={() => navigation.navigate("BookingDetail", { id: item.id })}
             />
           )}

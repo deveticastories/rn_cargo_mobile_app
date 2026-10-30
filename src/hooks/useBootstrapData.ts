@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAppDispatch } from "@/store/hooks";
-import { fetchBookings } from "@/store/slices/bookingsSlice";
-import { fetchContainers } from "@/store/slices/containersSlice";
-import { fetchFinance } from "@/store/slices/financeSlice";
-import { fetchMaster } from "@/store/slices/mastersSlice";
+import { ensureBookings, ensureContainers, ensureFinance, ensureMaster } from "@/store/ensure";
 
 /**
  * Everything the tab screens summarise, loaded once after sign-in. Each list
@@ -12,13 +9,13 @@ import { fetchMaster } from "@/store/slices/mastersSlice";
 export function useBootstrapData() {
   const dispatch = useAppDispatch();
   useEffect(() => {
-    dispatch(fetchBookings());
-    dispatch(fetchContainers());
-    dispatch(fetchFinance());
-    dispatch(fetchMaster("customers"));
-    dispatch(fetchMaster("pickupAssigns"));
-    dispatch(fetchMaster("pickupPartners"));
-    dispatch(fetchMaster("team"));
+    dispatch(ensureBookings());
+    dispatch(ensureContainers());
+    dispatch(ensureFinance());
+    dispatch(ensureMaster("customers"));
+    dispatch(ensureMaster("pickupAssigns"));
+    dispatch(ensureMaster("pickupPartners"));
+    dispatch(ensureMaster("team"));
   }, [dispatch]);
 }
 

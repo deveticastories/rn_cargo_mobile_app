@@ -4,6 +4,7 @@ import { containerService } from "@/services/containerService";
 import { bookingService } from "@/services/bookingService";
 import type { BookingPackage, Container, LoadStatus, Stuffing } from "@/types";
 import { createAppAsyncThunk } from "../thunk";
+import { cacheHydrated } from "../cacheActions";
 import { fetchBookings } from "./bookingsSlice";
 
 interface ContainersState {
@@ -53,6 +54,14 @@ const containersSlice = createSlice({
   initialState,
   reducers: {},
   extraReducers: (builder) => {
+    // Saved data from last time, only until this list has loaded from the server.
+    builder.addCase(cacheHydrated, (state, { payload }) => {
+      if (state.status === "succeeded" || !payload.containers) return;
+      state.items = payload.containers.items;
+      state.stuffings = payload.containers.stuffings;
+      state.packages = payload.containers.packages ?? [];
+    });
+
     builder
       .addCase(fetchContainers.pending, (state) => {
         state.status = "loading";

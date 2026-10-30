@@ -84,6 +84,24 @@ export const financeService = {
     const { data } = await api.post(API_ENDPOINTS.INVOICES.BASE, { container: body.containerId, booking: body.bookingId, deliveryPartner: body.deliveryPartnerId });
     return toInvoice(itemFrom(data, "data"));
   },
+  /** A payment received against an invoice (same fields the web console's Receipt entry sends). */
+  async createReceipt(body: {
+    invoiceId: string;
+    date: string;
+    receivableAmount: number;
+    receivedAmount: number;
+    receivedDate: string;
+    deliveryPartnerAmount: number;
+  }): Promise<void> {
+    await api.post(API_ENDPOINTS.RECEIPT_ENTRIES.BASE, {
+      invoice: body.invoiceId,
+      date: body.date,
+      receivableAmount: body.receivableAmount,
+      receivedAmount: body.receivedAmount,
+      receivedDate: body.receivedDate,
+      deliveryPartnerAmount: body.deliveryPartnerAmount,
+    });
+  },
   async createExpense(body: { date: string; type: string; paymentType: string; amount: number; description?: string }) {
     await api.post(API_ENDPOINTS.DAILY_EXPENSES.BASE, {
       date: body.date,

@@ -1,5 +1,5 @@
 /** 04 · Booking detail — progress timeline, contacts, shipment, charges, next action. */
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Alert, Linking, ScrollView, Share, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowRight, Check, ChevronLeft, Download, EllipsisVertical, FileText, Loader, MessageCircle, Phone, Share2, Trash2 } from "lucide-react-native";
@@ -12,16 +12,14 @@ import { Txt } from "@/components/Txt";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import type { RootScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { bookingStage, STAGE_META } from "@/store/selectors";
+import { bookingStage, selectPackingByBooking, STAGE_META } from "@/store/selectors";
+import { ensureMaster } from "@/store/ensure";
 import { deleteBooking } from "@/store/slices/bookingsSlice";
 import { useTheme } from "@/theme/ThemeProvider";
-import type { BackendDoc, Booking } from "@/types";
+import type { Booking } from "@/types";
 import { fullDate, money, shortDate } from "@/utils/format";
+import { downloadGoodsReceivedPdf } from "@/utils/goodsReceivedPdf";
 import { downloadInvoicePdf } from "@/utils/invoicePdf";
-import { downloadTablePdf } from "@/utils/tablePdf";
-import { str } from "@/services/mappers";
-import { packageService } from "@/services/packageService";
-import { fetchMaster } from "@/store/slices/mastersSlice";
 
 /**
  * Progress steps, following the web console's shipment pipeline (Repacking →
@@ -76,10 +74,18 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const invoice = useAppSelector((s) => s.finance.invoices.find((i) => i.bookingId === route.params.id));
+  const packing = useAppSelector(selectPackingByBooking);
+  const products = useAppSelector((s) => s.masters.products.items);
+  useEffect(() => {
+    dispatch(ensureMaster("products"));
+  }, [dispatch]);
+  // Bundle marks and product names for the invoice form PDF.
+  const invoiceExtras = {
+    marks: (packing.get(route.params.id)?.marks ?? []).join(", "),
+    productName: (id: string) => String(products.find((p) => p._id === id)?.name ?? ""),
+  };
   const [downloading, setDownloading] = useState(false);
   const [sharingPdf, setSharingPdf] = useState(false);
-  const products = useAppSelector((s) => s.masters.products.items);
-  const fabrics = useAppSelector((s) => s.masters.fabrics.items);
   const [noInvoiceOpen, setNoInvoiceOpen] = useState(false);
 
   const back = <IconButton icon={ChevronLeft} onPress={() => navigation.goBack()} accessibilityLabel="Back" />;
@@ -124,7 +130,7 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
       await downloadInvoicePdf(invoice, booking, {
         name: booking.receiver.name,
         lines: [receiverPlace, receiverInfo?.whatsapp ? `Ph: ${receiverInfo.whatsapp}` : ""],
-      });
+      }, invoiceExtras);
     } catch (e) {
       Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
@@ -132,58 +138,21 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
     }
   };
 
-  /** Booking details and its package list as a PDF for the share sheet (no charges). */
+  /** The booking as an Introlines Goods Received Note PDF, for the share sheet. */
   const shareDetailsPdf = async () => {
-    const party = (name: string, place: string, phone?: string) => [name || "-", place, phone ? `Ph: ${phone}` : ""].filter(Boolean).join(", ");
+    const phone = (p?: string) => (p ? `Ph: ${p}` : "");
+    const bundles = booking.actualBundle || booking.bundleCount;
     setSharingPdf(true);
     try {
-      // Product and fabric names come from their masters; load them if this session hasn't yet.
-      const [list, productItems, fabricItems] = await Promise.all([
-        packageService.getByBooking(booking.id),
-        products.length ? products : dispatch(fetchMaster("products")).unwrap().then((r) => r.items),
-        fabrics.length ? fabrics : dispatch(fetchMaster("fabrics")).unwrap().then((r) => r.items),
-      ]);
-      const nameOf = (items: BackendDoc[], id?: string) => (id ? str(items.find((x) => x._id === id)?.name) : "");
-      let totalQty = 0;
-      const packageRows = (list?.bundles ?? []).flatMap((b) =>
-        (b.lines.length ? b.lines : [null]).map((l, i) => {
-          totalQty += l?.quantity ?? 0;
-          return [
-            i === 0 ? String(b.bundleNo) : "",
-            l ? [nameOf(productItems, l.productId), nameOf(fabricItems, l.fabricId)].filter(Boolean).join(" - ") || "-" : "-",
-            l ? String(l.quantity || "") : "",
-            i === 0 && b.netWeight ? String(b.netWeight) : "",
-            i === 0 && b.grossWeight ? String(b.grossWeight) : "",
-          ];
-        })
-      );
-      await downloadTablePdf(`${booking.code}-details.pdf`, {
-        title: "BOOKING DETAILS",
-        info: [
-          ["Booking ID", booking.code],
-          ["Booking Date", fullDate(booking.date)],
-          ["Status", STAGE_META[bookingStage(booking)].label],
-          ["Sender", party(booking.sender.name, senderPlace, booking.sender.whatsapp || senderInfo?.whatsapp)],
-          ["Receiver", party(booking.receiver.name, receiverPlace, booking.receiver.whatsapp || receiverInfo?.whatsapp)],
-          ...(booking.pickupOption ? ([["Pickup LR", booking.pickupOption]] as [string, string][]) : []),
-        ],
-        head: ["Description", "Details"],
-        body: [
-          ["Bundles", `${booking.bundleCount}${booking.actualBundle ? ` (actual ${booking.actualBundle})` : ""}`],
-          ["Bundle type", booking.bundleType || "-"],
-          ["Product type", booking.productType || "-"],
-          ["Bill option", booking.billOption || "-"],
-          ["Package list status", booking.packageListStatus],
-        ],
-        sections: [
-          {
-            heading: "Package list",
-            head: ["Bundle No", "Products", "Qty", "Net wt (kg)", "Gross wt (kg)"],
-            body: packageRows,
-            foot: packageRows.length ? ["", "Total Qty", String(totalQty || ""), "", ""] : undefined,
-            emptyText: "No packing list saved yet.",
-          },
-        ],
+      await downloadGoodsReceivedPdf(`${booking.code}-goods-received.pdf`, {
+        bookingId: booking.code,
+        date: fullDate(booking.date),
+        shipmentMode: "By Sea",
+        sender: { name: booking.sender.name, lines: [senderPlace, phone(booking.sender.whatsapp || senderInfo?.whatsapp)] },
+        receiver: { name: booking.receiver.name, lines: [receiverPlace, phone(booking.receiver.whatsapp || receiverInfo?.whatsapp)] },
+        destination: receiverPlace || "-",
+        bundles: `${bundles}${booking.bundleType ? ` ${booking.bundleType}` : ""}`,
+        bundleMark: booking.code,
       });
     } catch (e) {
       Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");

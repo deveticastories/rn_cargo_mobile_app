@@ -15,7 +15,7 @@ import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { MoreScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { selectBookingStats } from "@/store/selectors";
-import { logout } from "@/store/slices/authSlice";
+import { logout, selectFinanceMode } from "@/store/slices/authSlice";
 import { setThemePreference } from "@/store/slices/uiSlice";
 import type { Tone } from "@/theme/palette";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -29,7 +29,10 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
   const dispatch = useAppDispatch();
   const { name, email, role } = useCurrentUser();
   const themePreference = useAppSelector((s) => s.ui.themePreference);
-  const pendingPickups = useAppSelector((s) => s.masters.pickupAssigns.items.filter((a) => a.pickupStatus !== "Collected" && a.status !== false).length);
+  const financeMode = useAppSelector(selectFinanceMode);
+  const pendingPickups = useAppSelector(
+    (s) => s.masters.pickupAssigns.items.filter((a) => a.pickupStatus !== "Collected" && a.status !== false).length
+  );
   const repacking = useAppSelector(selectBookingStats).counts.repacking;
   const version = Constants.expoConfig?.version ?? "1.0.0";
   const scrollRef = useRef<ScrollView>(null);
@@ -62,59 +65,67 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
           </View>
         </Card>
 
-        {/* Masters */}
+        {/* Masters (finance users only need Containers) */}
         <SectionTitle title="Masters" />
-        <View style={styles.grid}>
-          {MASTER_GRID.map((key) => {
-            const def = MASTERS[key];
-            return (
-              <Card key={key} style={styles.gridItem} onPress={() => navigation.navigate("MasterList", { masterKey: key })}>
-                <IconTile icon={def.icon} tone={def.tone} size={38} />
-                <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
-                  {def.title}
-                </Txt>
-              </Card>
-            );
-          })}
-          <Card style={styles.gridItem} onPress={() => navigation.navigate("StuffedContainers")}>
-            <IconTile icon={Ship} tone="info" size={38} />
-            <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
-              Containers
-            </Txt>
-          </Card>
+        <View style={[styles.grid, financeMode && { justifyContent: "flex-start" }]}>
+          {!financeMode &&
+            MASTER_GRID.map((key) => {
+              const def = MASTERS[key];
+              return (
+                <Card key={key} style={styles.gridItem} onPress={() => navigation.navigate("MasterList", { masterKey: key })}>
+                  <IconTile icon={def.icon} tone={def.tone} size={38} />
+                  <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
+                    {def.title}
+                  </Txt>
+                </Card>
+              );
+            })}
+          {/* Stuffed containers are finance-mode work only. */}
+          {financeMode && (
+            <Card style={styles.gridItem} onPress={() => navigation.navigate("StuffedContainers")}>
+              <IconTile icon={Ship} tone="info" size={38} />
+              <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
+                Containers
+              </Txt>
+            </Card>
+          )}
         </View>
 
-        {/* Operations */}
-        <SectionTitle title="Operations" />
-        <Card padded={false}>
-          <OpRow
-            icon={MASTERS.pickupAssigns.icon}
-            tone="info"
-            label="Pickup assign"
-            count={pendingPickups}
-            onPress={() => navigation.navigate("MasterList", { masterKey: "pickupAssigns" })}
-          />
-          <OpRow
-            icon={MASTERS.preBookings.icon}
-            tone="purple"
-            label="Pre-booking"
-            onPress={() => navigation.navigate("MasterList", { masterKey: "preBookings" })}
-          />
-          <OpRow
-            icon={Repeat}
-            tone="warning"
-            label="Repacking"
-            count={repacking}
-            onPress={() => navigation.navigate("Bookings", { filter: "repacking" })}
-          />
-          <OpRow
-            icon={ArrowLeftRight}
-            tone="success"
-            label="Ready to stuff"
-            onPress={() => navigation.navigate("Bookings", { filter: "readyToStuff" })}
-            last
-          />
-        </Card>
+        {/* Operations (booking work — hidden in finance mode) */}
+        {!financeMode && (
+          <>
+            <SectionTitle title="Operations" />
+            <Card padded={false}>
+              <OpRow
+                icon={MASTERS.pickupAssigns.icon}
+                tone="info"
+                label="Pickup assign"
+                count={pendingPickups}
+                onPress={() => navigation.navigate("MasterList", { masterKey: "pickupAssigns" })}
+              />
+              <OpRow
+                icon={MASTERS.preBookings.icon}
+                tone="purple"
+                label="Pre-booking"
+                onPress={() => navigation.navigate("MasterList", { masterKey: "preBookings" })}
+              />
+              <OpRow
+                icon={Repeat}
+                tone="warning"
+                label="Repacking"
+                count={repacking}
+                onPress={() => navigation.navigate("Bookings", { filter: "packingList" })}
+              />
+              <OpRow
+                icon={ArrowLeftRight}
+                tone="success"
+                label="Ready to stuff"
+                onPress={() => navigation.navigate("Bookings", { filter: "readyToStuff" })}
+                last
+              />
+            </Card>
+          </>
+        )}
 
         {/* Appearance */}
         <SectionTitle title="Appearance" />
@@ -220,6 +231,15 @@ const styles = StyleSheet.create({
   gridItem: { width: "31.5%", alignItems: "center", paddingVertical: 16, paddingHorizontal: 6 },
   opRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 14 },
   count: { minWidth: 24, height: 24, paddingHorizontal: 7, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  account: { flexDirection: "row", alignItems: "center", gap: 10, alignSelf: "stretch", marginTop: 16, padding: 10, borderRadius: 14, borderWidth: 1 },
+  account: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    alignSelf: "stretch",
+    marginTop: 16,
+    padding: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
   accountAvatar: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
 });

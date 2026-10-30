@@ -9,7 +9,8 @@ import { num, str } from "@/services/mappers";
 import { useAppSelector } from "@/store/hooks";
 import { selectPackingByBooking, selectReceivedByInvoice } from "@/store/selectors";
 import type { Booking, Invoice } from "@/types";
-import type { PdfParty } from "@/utils/tablePdf";
+import { fullDate } from "@/utils/format";
+import { downloadTablePdf, type PdfParty } from "@/utils/tablePdf";
 
 export interface StuffedRow {
   id: string;
@@ -100,4 +101,30 @@ export function useStuffedData() {
 
 export const PAYMENT_TONE = { Paid: "success", "Partially paid": "warning", Unpaid: "danger", "Not invoiced": "neutral" } as const;
 
-export const pdfMoney = (n: number | undefined) => (n === undefined ? "-" : `Rs. ${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+export const pdfMoney = (n: number | undefined) => (n === undefined ? "-" : `AED ${Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 2 })}`);
+
+/** The web's container manifest ("CONTAINER BOOKING LIST") for one stuffing. */
+export function downloadContainerBookingList(row: StuffedRow, bookings: StuffedBooking[]) {
+  const sum = (f: (b: StuffedBooking) => number | undefined) => bookings.reduce((n, b) => n + (f(b) ?? 0), 0);
+  const party = (p: StuffedBooking["sender"]) => [p.name, ...p.lines.filter(Boolean)].join(", ");
+  return downloadTablePdf(`${row.containerCode}-booking-list.pdf`, {
+    title: "CONTAINER BOOKING LIST",
+    landscape: true,
+    info: [
+      ["Container ID", row.containerCode],
+      ["Container Name", row.containerName],
+      ["Stuffed Date", row.stuffedDate ? fullDate(row.stuffedDate) : "-"],
+      ["No. of Bookings", String(bookings.length)],
+    ],
+    head: ["Booking ID", "Receiver Details", "Bundle Mark", "Bundle Count", "Delivery Partner Payable Amount", "Total Receivable Amount"],
+    body: bookings.map((b) => [
+      b.booking?.code ?? "—",
+      party(b.receiver),
+      b.bundleMarks || "-",
+      String(b.bundles),
+      pdfMoney(b.deliveryPartnerAmount),
+      pdfMoney(b.receivable),
+    ]),
+    foot: ["", "", "Total", String(sum((b) => b.bundles)), pdfMoney(sum((b) => b.deliveryPartnerAmount)), pdfMoney(sum((b) => b.receivable))],
+  });
+}

@@ -16,7 +16,7 @@ import { refField, str } from "@/services/mappers";
 import type { BookingInput } from "@/services/bookingService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { createBooking } from "@/store/slices/bookingsSlice";
-import { fetchMaster } from "@/store/slices/mastersSlice";
+import { ensureMaster } from "@/store/ensure";
 import { radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { BackendDoc, BillOption, BundleType, ProductType, RepackingStatus } from "@/types";
@@ -25,13 +25,18 @@ import { money, todayISO } from "@/utils/format";
 const STEP_TITLES = ["Pickup & date", "Shipment details", "Charges & review"] as const;
 const BUNDLE_TYPES: BundleType[] = ["Bundle", "Box", "CBM", "KG"];
 const PACKAGE_STATUSES: readonly RepackingStatus[] = ["Ready to Ship", "Repacking Required"];
+/** The web console shows these values as "Package Ready" / "Repacking". */
+const PACKAGE_STATUS_LABELS: Record<RepackingStatus, string> = { "Ready to Ship": "Package ready", "Repacking Required": "Repacking" };
 const ANY_PARTNER = "__latest__";
 
-/** cargo-backend requires every booking to reference a Pickup Assign; like the web form, link the newest one. */
+/**
+ * Like the web form, a booking links the newest active Pickup Assign — the chosen partner's when it has one,
+ * otherwise the newest of all. Pick up via never blocks the booking.
+ */
 function latestPickupAssign(assigns: BackendDoc[], partner: string | null): BackendDoc | undefined {
-  return assigns
-    .filter((a) => a.status !== false && (!partner || str(refField(a.transport, "name")) === partner))
-    .reduce<BackendDoc | undefined>((latest, a) => (!latest || a._id > latest._id ? a : latest), undefined);
+  const newest = (list: BackendDoc[]) => list.reduce<BackendDoc | undefined>((latest, a) => (!latest || a._id > latest._id ? a : latest), undefined);
+  const active = assigns.filter((a) => a.status !== false);
+  return (partner && newest(active.filter((a) => str(refField(a.transport, "name")) === partner))) || newest(active);
 }
 
 export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) {
@@ -60,9 +65,9 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
   const [bundleCharge, setBundleCharge] = useState("");
 
   useEffect(() => {
-    dispatch(fetchMaster("customers"));
-    dispatch(fetchMaster("pickupAssigns"));
-    dispatch(fetchMaster("pickupPartners"));
+    dispatch(ensureMaster("customers"));
+    dispatch(ensureMaster("pickupAssigns"));
+    dispatch(ensureMaster("pickupPartners"));
   }, [dispatch]);
 
   const toOption = (c: BackendDoc): SelectOption => ({
@@ -90,10 +95,6 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
   const validate = (s: number): string | null => {
     if (s === 0) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(date).getTime())) return "Choose a booking date.";
-      if (!assign)
-        return partner === ANY_PARTNER
-          ? "No pickup assign exists yet — create one under More → Pickup assign first."
-          : `No pickup assign exists for ${partner} yet — create one under More → Pickup assign first.`;
     }
     if (s === 1) {
       if (!senderId) return "Choose a sender.";
@@ -123,7 +124,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
     const input: BookingInput = {
       senderId,
       receiverId,
-      pickupAssignId: assign!._id,
+      pickupAssignId: assign?._id,
       date,
       billOption,
       bundleType,
@@ -215,7 +216,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
               {showBrand && <Hint text="Branded goods carry a brand handling charge." />}
 
               <Label text="Package status" />
-              <Segmented options={PACKAGE_STATUSES} value={packingStatus} onChange={setPackingStatus} />
+              <Segmented options={PACKAGE_STATUSES} value={packingStatus} onChange={setPackingStatus} labels={PACKAGE_STATUS_LABELS} />
 
               <Label text="Bundle count" />
               <View style={[styles.stepper, { borderColor: t.border, backgroundColor: t.surface }]}>
@@ -250,9 +251,9 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
                 <ReviewRow label="Sender" value={shortCity(senders.find((s) => s.value === senderId))} />
                 <ReviewRow label="Receiver" value={shortCity(receivers.find((r) => r.value === receiverId))} />
                 <ReviewRow label="Date" value={date} />
-                <ReviewRow label="Pickup" value={assign ? `LR ${str(assign.lrNo)}` : "—"} />
+                <ReviewRow label="Pickup" value={partnerOptions.find((o) => o.value === partner)?.label ?? "—"} />
                 <ReviewRow label="Shipment" value={`${bundleCount} × ${bundleType} · ${productType} · ${billOption}`} />
-                <ReviewRow label="Package status" value={packingStatus} />
+                <ReviewRow label="Package status" value={PACKAGE_STATUS_LABELS[packingStatus]} />
                 <DashedDivider />
                 <View style={styles.reviewRow}>
                   <Txt size={14} weight="bold">

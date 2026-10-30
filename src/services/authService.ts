@@ -11,7 +11,18 @@ interface LoginResponse {
   success: boolean;
   message?: string;
   token?: string;
-  user?: { _id: string; email: string; role: string; name?: string };
+  user?: { id?: string; _id?: string; email: string; role?: unknown; name?: string };
+}
+
+/** The role's name, whether it comes as "Fin", { name: "Fin" } or ["Fin"]. */
+export function roleName(role: unknown): string {
+  if (typeof role === "string") return role.trim();
+  if (Array.isArray(role)) return role.map(roleName).find(Boolean) ?? "";
+  if (role && typeof role === "object") {
+    const r = role as Record<string, unknown>;
+    return roleName(r.name ?? r.roleName ?? r.role ?? r.title ?? "");
+  }
+  return role == null ? "" : String(role);
 }
 
 export async function loginRequest(email: string, password: string): Promise<{ token: string; user: AuthUser }> {
@@ -19,6 +30,6 @@ export async function loginRequest(email: string, password: string): Promise<{ t
   if (!data.token || !data.user) throw new ApiError(data.message || "Invalid email or password.", 401);
   return {
     token: data.token,
-    user: { id: data.user._id, email: data.user.email, role: data.user.role, name: data.user.name },
+    user: { id: data.user.id ?? data.user._id ?? "", email: data.user.email, role: roleName(data.user.role), name: data.user.name },
   };
 }

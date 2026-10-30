@@ -14,11 +14,11 @@ import type { MoreScreenProps } from "@/navigation/types";
 import { str } from "@/services/mappers";
 import { packageService, type BookingPackingList } from "@/services/packageService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { fetchMaster } from "@/store/slices/mastersSlice";
+import { ensureMaster } from "@/store/ensure";
 import { useTheme } from "@/theme/ThemeProvider";
 import { fullDate, money } from "@/utils/format";
 import { downloadTablePdf } from "@/utils/tablePdf";
-import { PAYMENT_TONE, pdfMoney, useStuffedData, type StuffedBooking, type StuffedRow } from "./useStuffedData";
+import { downloadContainerBookingList, PAYMENT_TONE, pdfMoney, useStuffedData, type StuffedBooking, type StuffedRow } from "./useStuffedData";
 
 interface BundleLine {
   bundle: string;
@@ -36,8 +36,8 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
   const [downloading, setDownloading] = useState<string | null>(null);
 
   useEffect(() => {
-    dispatch(fetchMaster("products"));
-    dispatch(fetchMaster("fabrics"));
+    dispatch(ensureMaster("products"));
+    dispatch(ensureMaster("fabrics"));
   }, [dispatch]);
 
   const bookings = useMemo(() => (row ? row.bookingIds.map(bookingRow) : []), [row, bookingRow]);
@@ -69,29 +69,7 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
   };
 
   /** The web's container manifest ("CONTAINER BOOKING LIST"). */
-  const downloadManifest = () =>
-    run("manifest", () => {
-      const sum = (f: (b: StuffedBooking) => number | undefined) => bookings.reduce((n, b) => n + (f(b) ?? 0), 0);
-      const party = (p: StuffedBooking["sender"]) => [p.name, ...p.lines.filter(Boolean)].join(", ");
-      return downloadTablePdf(`${row.containerCode}-booking-list.pdf`, {
-        title: "CONTAINER BOOKING LIST",
-        landscape: true,
-        info: [...containerInfo, ["Stuffed Date", row.stuffedDate ? fullDate(row.stuffedDate) : "-"], ["No. of Bookings", String(bookings.length)]],
-        head: ["Sl No", "Booking ID", "Sender Details", "Receiver Details", "No. of Bundles", "Bundle Mark", "Total Receivable", "Delivery Partner Amt", "Payment Status"],
-        body: bookings.map((b, i) => [
-          String(i + 1),
-          b.booking?.code ?? "—",
-          party(b.sender),
-          party(b.receiver),
-          String(b.bundles),
-          b.bundleMarks || "-",
-          pdfMoney(b.receivable),
-          pdfMoney(b.deliveryPartnerAmount),
-          b.paymentStatus,
-        ]),
-        foot: ["", "", "", "Total", String(sum((b) => b.bundles)), "", pdfMoney(sum((b) => b.receivable)), pdfMoney(sum((b) => b.deliveryPartnerAmount)), ""],
-      });
-    });
+  const downloadManifest = () => run("manifest", () => downloadContainerBookingList(row, bookings));
 
   const totalBundles = bookings.reduce((n, b) => n + b.bundles, 0);
 
@@ -124,7 +102,7 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
           <EmptyView title="No bookings" message="This stuffing has no bookings recorded." />
         ) : (
           bookings.map((b, i) => (
-            <BookingCard
+            <StuffedBookingCard
               key={b.id}
               slNo={i + 1}
               item={b}
@@ -142,7 +120,8 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
   );
 }
 
-function BookingCard({
+/** A booking on a stuffed container: tap to expand its charges and bundles, each with its PDF (web's expanded row). */
+export function StuffedBookingCard({
   slNo,
   item,
   row,

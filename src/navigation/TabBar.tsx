@@ -9,12 +9,21 @@ import { Animated, BackHandler, Easing, Keyboard, Pressable, StyleSheet, View } 
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { ArrowLeftRight, ClipboardList, FileText, House, LayoutGrid, Package, Plus, Ship, Truck } from "lucide-react-native";
+import { ArrowLeftRight, ClipboardList, FileText, House, LayoutGrid, Package, Plus, ReceiptText, Ship, Truck } from "lucide-react-native";
 import { Txt } from "@/components/Txt";
 import type { RootStackParamList } from "@/navigation/types";
+import { useAppSelector } from "@/store/hooks";
+import { selectFinanceMode } from "@/store/slices/authSlice";
 import { useTheme } from "@/theme/ThemeProvider";
 
-const ICONS = { Home: House, Bookings: Package, Invoices: FileText, DeliveryNotes: Truck, Stuffing: ArrowLeftRight, More: LayoutGrid } as const;
+const ICONS = {
+  Home: House,
+  Bookings: Package,
+  Invoices: FileText,
+  DeliveryNotes: Truck,
+  Stuffing: ArrowLeftRight,
+  More: LayoutGrid,
+} as const;
 /** Tab labels where the route name isn't short enough to show as-is. */
 const LABELS: Record<string, string> = { DeliveryNotes: "Delivery" };
 
@@ -30,17 +39,20 @@ const ARC_TO = 45;
 const ACTION_WIDTH = 96;
 const ACTION_HEIGHT = 60;
 
-type FabAction = { key: Extract<keyof RootStackParamList, "Containers" | "NewBooking">; label: string; icon: typeof Ship };
+type FabAction = { key: Extract<keyof RootStackParamList, "Containers" | "NewBooking" | "ReceiptEntry">; label: string; icon: typeof Ship };
 
 // Placed along the arc from left to right.
 const FAB_ACTIONS: FabAction[] = [
   { key: "Containers", label: "Containers", icon: Ship },
   { key: "NewBooking", label: "New booking", icon: ClipboardList },
 ];
+// Finance mode: the + button records a receipt instead.
+const FINANCE_ACTIONS: FabAction[] = [{ key: "ReceiptEntry", label: "Receipt entry", icon: ReceiptText }];
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const actions = useAppSelector(selectFinanceMode) ? FINANCE_ACTIONS : FAB_ACTIONS;
   const anim = useRef(new Animated.Value(0)).current;
   const [open, setOpen] = useState(false);
   const [bar, setBar] = useState({ y: 0, width: 0 });
@@ -117,8 +129,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: t.overlay, opacity: anim }]}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => closeMenu()} accessibilityLabel="Close menu" />
           </Animated.View>
-          {FAB_ACTIONS.map((a, i) => {
-            const angle = ((ARC_FROM - (i * (ARC_FROM - ARC_TO)) / Math.max(FAB_ACTIONS.length - 1, 1)) * Math.PI) / 180;
+          {actions.map((a, i) => {
+            // A single action sits straight above the + button; several fan out along the arc.
+            const deg = actions.length === 1 ? 90 : ARC_FROM - (i * (ARC_FROM - ARC_TO)) / (actions.length - 1);
+            const angle = (deg * Math.PI) / 180;
             const dx = ARC_RADIUS * Math.cos(angle);
             const dy = -ARC_RADIUS * Math.sin(angle);
             // Each action springs out of the + button to its spot on the arc.
@@ -142,7 +156,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                   accessibilityRole="button"
                   accessibilityLabel={a.label}
                   onPress={() => closeMenu(() => navigation.getParent()?.navigate(a.key))}
-                  style={({ pressed }) => [styles.action, { backgroundColor: t.surface, borderColor: t.border, shadowColor: t.shadow, opacity: pressed ? 0.85 : 1 }]}
+                  style={({ pressed }) => [
+                    styles.action,
+                    { backgroundColor: t.surface, borderColor: t.border, shadowColor: t.shadow, opacity: pressed ? 0.85 : 1 },
+                  ]}
                 >
                   <a.icon size={21} color={t.textMuted} strokeWidth={1.8} />
                   <Txt size={10.5} weight="medium" color={t.textMuted} style={{ marginTop: 3 }}>
@@ -184,7 +201,14 @@ const styles = StyleSheet.create({
   bar: { flexDirection: "row", alignItems: "flex-start", borderTopWidth: StyleSheet.hairlineWidth, paddingTop: BAR_PADDING_TOP },
   tab: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 2 },
   fabSlot: { flex: 1, alignItems: "center" },
-  fabShadow: { marginTop: -FAB_LIFT, borderRadius: 18, shadowOpacity: 0.45, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 },
+  fabShadow: {
+    marginTop: -FAB_LIFT,
+    borderRadius: 18,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
   fab: { width: FAB_SIZE, height: FAB_SIZE, borderRadius: 18, alignItems: "center", justifyContent: "center" },
   actionSlot: { position: "absolute", width: ACTION_WIDTH, height: ACTION_HEIGHT },
   action: {

@@ -16,7 +16,8 @@ interface ConfirmDialogProps {
   title: string;
   message?: string;
   confirmLabel: string;
-  cancelLabel?: string;
+  /** `null` hides the cancel button (an info popup with a single OK). */
+  cancelLabel?: string | null;
   /** Styles the confirm button red. */
   destructive?: boolean;
   /** Shows a spinner on the confirm button and blocks dismissal while the action runs. */
@@ -61,7 +62,7 @@ export function ConfirmDialog({
           )}
           {children}
           <View style={styles.actions}>
-            <Button title={cancelLabel} variant="secondary" onPress={dismiss} disabled={loading} height={48} style={{ flex: 1 }} />
+            {cancelLabel !== null && <Button title={cancelLabel} variant="secondary" onPress={dismiss} disabled={loading} height={48} style={{ flex: 1 }} />}
             <Button
               title={confirmLabel}
               variant={destructive ? "danger" : "primary"}

@@ -6,7 +6,7 @@
  */
 import { createSlice } from "@reduxjs/toolkit";
 import { errorMessage, setAccessToken } from "@/api/client";
-import { loginRequest } from "@/services/authService";
+import { loginRequest, roleName } from "@/services/authService";
 import { clearSession, loadLastEmail, loadSession, saveLastEmail, saveSession } from "@/storage/authStorage";
 import { isTokenValid } from "@/utils/jwt";
 import type { AuthUser, LoadStatus } from "@/types";
@@ -37,7 +37,8 @@ export const restoreSession = createAppAsyncThunk("auth/restore", async () => {
   const [{ token, user }, lastEmail] = await Promise.all([loadSession(), loadLastEmail()]);
   if (token && user && isTokenValid(token)) {
     setAccessToken(token);
-    return { token, user, lastEmail: lastEmail ?? "", expired: false };
+    // Sessions saved by older builds may hold the role as an object.
+    return { token, user: { ...user, role: roleName(user.role) }, lastEmail: lastEmail ?? "", expired: false };
   }
   // A stored token that has since expired means the session ran out while the app was closed.
   const expired = Boolean(token);
@@ -123,6 +124,13 @@ const authSlice = createSlice({
       });
   },
 });
+
+/**
+ * Finance users ("Fin" role) work on invoices, delivery notes and receipts
+ * instead of bookings and stuffing.
+ */
+export const isFinanceRole = (role?: unknown) => /^fin/i.test(roleName(role));
+export const selectFinanceMode = (s: { auth: AuthState }) => isFinanceRole(s.auth.user?.role);
 
 export const { sessionExpired, clearAuthError } = authSlice.actions;
 export default authSlice.reducer;

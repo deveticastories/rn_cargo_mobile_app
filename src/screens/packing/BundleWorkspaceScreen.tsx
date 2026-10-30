@@ -10,13 +10,14 @@
  *   list and Save it straight to cargo-backend. Once every bundle has one, the
  *   booking's package list is marked Added (and it shows up in Ready to stuff).
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, CheckCircle2, ChevronLeft, Download, Plus, Save, X } from "lucide-react-native";
 import { errorMessage } from "@/api/client";
 import { Button } from "@/components/Button";
-import { Card, Chip, IconButton, SectionTitle } from "@/components/primitives";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Badge, Card, Chip, IconButton, SectionTitle } from "@/components/primitives";
 import { NavHeader, Notice, Screen } from "@/components/Screen";
 import { SelectField, type SelectOption } from "@/components/SelectSheet";
 import { TextField } from "@/components/TextField";
@@ -30,7 +31,7 @@ import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { selectPackingByBooking } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
-import { fetchMaster } from "@/store/slices/mastersSlice";
+import { ensureMaster } from "@/store/ensure";
 import { radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Booking } from "@/types";
@@ -116,14 +117,41 @@ const toPackingLines = (lines: Line[]): PackingLine[] =>
   lines.filter(hasData).map((l) => ({ productId: l.product, quantity: Number(l.qty) || 1, fabricId: l.fabric || undefined, description: l.description || undefined }));
 
 export function RepackingScreen(props: RootScreenProps<"Repacking">) {
-  return <BundleWorkspace mode="repack" bookingId={props.route.params?.bookingId} onBack={() => props.navigation.goBack()} />;
+  return (
+    <BundleWorkspace
+      mode="repack"
+      bookingId={props.route.params?.bookingId}
+      onBack={() => props.navigation.goBack()}
+      // After repacking is confirmed, "Go back" returns to the Bookings list (closing the booking too).
+      onDone={() => props.navigation.popTo("Main", { screen: "Bookings" })}
+    />
+  );
 }
 
 export function ReadyToShipScreen(props: RootScreenProps<"ReadyToShip">) {
-  return <BundleWorkspace mode="ready" bookingId={props.route.params?.bookingId} onBack={() => props.navigation.goBack()} />;
+  return (
+    <BundleWorkspace
+      mode="ready"
+      bookingId={props.route.params?.bookingId}
+      onBack={() => props.navigation.goBack()}
+      // Once every bundle has its packing list, "Go back" returns to the Bookings list (closing the booking too).
+      onDone={() => props.navigation.popTo("Main", { screen: "Bookings" })}
+    />
+  );
 }
 
-function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; bookingId?: string; onBack: () => void }) {
+function BundleWorkspace({
+  mode,
+  bookingId: initialId,
+  onBack,
+  onDone,
+}: {
+  mode: Mode;
+  bookingId?: string;
+  onBack: () => void;
+  /** Where "Go back" leads once the work is finished (defaults to onBack). */
+  onDone?: () => void;
+}) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const dispatch = useAppDispatch();
@@ -131,6 +159,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
   const products = useAppSelector((s) => s.masters.products.items);
   const fabrics = useAppSelector((s) => s.masters.fabrics.items);
   const packing = useAppSelector(selectPackingByBooking);
+  const packages = useAppSelector((s) => s.containers.packages);
   const lookup = useCustomerLookup();
 
   const [bookingId, setBookingId] = useState(initialId ?? "");
@@ -148,13 +177,17 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
   const [created, setCreated] = useState(0);
   const [staged, setStaged] = useState<DraftBundle[]>([]);
   const [repackedBy, setRepackedBy] = useState("");
+  const [repackDone, setRepackDone] = useState(false);
+  // The bundle count as it was when the booking was opened: Confirm overwrites the booking's
+  // bundleCount with the repacked total, but "Actual bundles" keeps showing the original.
+  const firstCounts = useRef(new Map<string, number>());
   // Ready to ship: the booking's packing list as saved on cargo-backend.
   const [saved, setSaved] = useState<BookingPackingList | null>(null);
   const [loadingList, setLoadingList] = useState(false);
 
   useEffect(() => {
-    dispatch(fetchMaster("products"));
-    dispatch(fetchMaster("fabrics"));
+    dispatch(ensureMaster("products"));
+    dispatch(ensureMaster("fabrics"));
   }, [dispatch]);
 
   const booking = bookings.find((b) => b.id === bookingId);
@@ -176,8 +209,17 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
   );
   const bookingOptions = eligible.map((b) => ({ value: b.id, label: b.code, sublabel: `${b.sender.name} → ${b.receiver.name}` }));
 
+  // Bundle mark ID of each saved bundle of this booking, by bundle no. Unsaved bundles have no mark yet.
+  const markByBundleNo = useMemo(() => bundleMarks(packages, bookingId), [packages, bookingId]);
+  // Popup after a save: each saved bundle with its mark ID and the items added.
+  const [savedPopup, setSavedPopup] = useState<{ title: string; message: string; bundles: { bundleNo: number; mark?: number; lines: PopupLine[] }[] } | null>(null);
+  const popupLines = (lines: DraftBundle["lines"]): PopupLine[] =>
+    lines.filter(hasData).map((l) => ({ product: [productName(l.product), fabricName(l.fabric)].filter(Boolean).join(" · "), qty: l.qty || "1" }));
   const savedNos = useMemo(() => new Set(saved?.bundles.map((b) => b.bundleNo) ?? []), [saved]);
-  const bundleNos = booking ? Array.from({ length: Math.max(1, booking.bundleCount || 1) }, (_, i) => i + 1) : [];
+  if (booking && !firstCounts.current.has(booking.id)) firstCounts.current.set(booking.id, booking.bundleCount || 0);
+  const actualBundles = booking ? firstCounts.current.get(booking.id) ?? booking.bundleCount : 0;
+  const bundleNos = booking ?Array.from({ length: Math.max(1, booking.bundleCount || 1) }, (_, i) => i + 1) : [];
+  const allPacked = !loadingList && bundleNos.length > 0 && bundleNos.every((n) => savedNos.has(n));
 
   const openBundle = (bundleNo: number) => {
     setDraftErrors(null);
@@ -270,7 +312,15 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
       setSaved(list);
       const complete = list.bundles.length >= needed(booking);
       if (complete) await bookingService.markPackageListAdded(booking.id).catch(() => {});
-      await Promise.all([dispatch(fetchContainers()), dispatch(fetchBookings())]);
+      const [containersRes] = await Promise.all([dispatch(fetchContainers()), dispatch(fetchBookings())]);
+      const freshPackages = fetchContainers.fulfilled.match(containersRes) ? containersRes.payload.packages : packages;
+      // Like the web: a popup with the saved bundle's mark ID and what was added.
+      const mark = bundleMarks(freshPackages, booking.id).get(draft.bundleNo);
+      setSavedPopup({
+        title: mark !== undefined ? `Bundle mark ID ${mark}` : "Bundle mark ID pending",
+        message: `Bundle ${draft.bundleNo} saved`,
+        bundles: [{ bundleNo: draft.bundleNo, mark, lines: popupLines(draft.lines) }],
+      });
       const done = new Set(list.bundles.map((b) => b.bundleNo));
       const next = bundleNos.find((n) => !done.has(n));
       setNotice(`Saved ${count} item${count === 1 ? "" : "s"} for Bundle ${draft.bundleNo}.${next ? "" : " Every bundle now has a packing list."}`);
@@ -303,10 +353,16 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
       }
       await bookingService.update(booking.id, { bundleCount: staged.length, packingStatus: "Ready to Ship" });
       await bookingService.markPackageListAdded(booking.id).catch(() => {});
-      await Promise.all([dispatch(fetchBookings()), dispatch(fetchContainers())]);
-      Alert.alert("Repacking confirmed", `Saved ${staged.length} bundle${staged.length === 1 ? "" : "s"} for ${booking.code}. It's now ready to ship.`, [
-        { text: "Done", onPress: onBack },
-      ]);
+      const [, containersRes] = await Promise.all([dispatch(fetchBookings()), dispatch(fetchContainers())]);
+      const freshPackages = fetchContainers.fulfilled.match(containersRes) ? containersRes.payload.packages : packages;
+      const marks = bundleMarks(freshPackages, booking.id);
+      setSavedPopup({
+        title: "Repacking confirmed",
+        message: `${staged.length} bundle${staged.length === 1 ? "" : "s"} saved`,
+        bundles: staged.map((b) => ({ bundleNo: b.bundleNo, mark: marks.get(b.bundleNo), lines: popupLines(b.lines) })),
+      });
+      setRepackDone(true);
+      setNotice(`Repacking confirmed: saved ${staged.length} bundle${staged.length === 1 ? "" : "s"} for ${booking.code}. It's now package ready.`);
     } catch (e) {
       setError(errorMessage(e, "Failed to save the bundles."));
     } finally {
@@ -345,7 +401,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
     }
   };
 
-  const title = mode === "repack" ? "Repacking" : "Ready to ship";
+  const title = mode === "repack" ? "Repacking" : "Package ready";
 
   return (
     <Screen>
@@ -363,14 +419,29 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <SelectField
-            label="Booking"
-            placeholder="Choose a booking"
-            value={bookingId}
-            options={bookingOptions}
-            onChange={setBookingId}
-            emptyText={mode === "repack" ? "No bookings need repacking." : "Every ready-to-ship booking already has its packing list."}
-          />
+          {/* Opened from a booking, the workspace works on that booking only. */}
+          {initialId ? (
+            <TextField
+              label="Booking"
+              value={booking?.code ?? "—"}
+              editable={false}
+            />
+          ) : (
+            <SelectField
+              label="Booking"
+              placeholder="Choose a booking"
+              value={bookingId}
+              options={bookingOptions}
+              onChange={setBookingId}
+              emptyText={mode === "repack" ? "No bookings need repacking." : "Every ready-to-ship booking already has its packing list."}
+            />
+          )}
+          {booking && (
+            <>
+              <TextField label="Sender" value={[booking.sender.name, lookup.senderPlace(booking)].filter(Boolean).join(" · ") || "—"} editable={false} />
+              <TextField label="Receiver" value={[booking.receiver.name, lookup.receiverPlace(booking)].filter(Boolean).join(" · ") || "—"} editable={false} />
+            </>
+          )}
 
           {error && <Notice message={error} tone="danger" />}
           {notice && <SuccessNote text={notice} />}
@@ -389,7 +460,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
                         Actual bundles
                       </Txt>
                       <Txt size={20} weight="bold">
-                        {booking.bundleCount || 1}
+                        {actualBundles}
                       </Txt>
                     </View>
                     <Button
@@ -397,7 +468,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
                       icon={Plus}
                       variant="secondary"
                       height={44}
-                      disabled={!!draft}
+                      disabled={!!draft || repackDone}
                       onPress={() => {
                         const n = created + 1;
                         setCreated(n);
@@ -426,6 +497,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
                           key={n}
                           n={n}
                           saved={savedNos.has(n)}
+                          mark={markByBundleNo.get(n)}
                           active={draft?.bundleNo === n}
                           onPress={() => {
                             setNotice(null);
@@ -466,7 +538,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
                 />
               ) : mode === "ready" ? (
                 <Txt size={13} muted align="center" style={{ marginVertical: 12 }}>
-                  Select another bundle above to add its packing list.
+                  {allPacked ? "Every bundle has its packing list." : "Select another bundle above to add its packing list."}
                 </Txt>
               ) : null}
 
@@ -483,6 +555,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
                     value={repackedBy}
                     onChangeText={(v) => setRepackedBy(v.replace(/[^\p{L}\p{M} .,\-'&/()]/gu, ""))}
                     placeholder="Who repacked these bundles?"
+                    editable={!repackDone}
                     error={triedConfirm || (staged.length > 0 && repackedBy !== "") ? repackedByError(repackedBy) : null}
                   />
                 </Card>
@@ -492,7 +565,7 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
                 <View style={{ marginTop: 18 }}>
                   <SectionTitle title={mode === "repack" ? "Added bundles" : "Added items"} />
                   {added.map((b) => (
-                    <AddedBundle key={b.bundleNo} bundleNo={b.bundleNo} lines={b.lines} />
+                    <AddedBundle key={b.bundleNo} bundleNo={b.bundleNo} mark={markByBundleNo.get(b.bundleNo)} lines={b.lines} />
                   ))}
                 </View>
               )}
@@ -502,16 +575,69 @@ function BundleWorkspace({ mode, bookingId: initialId, onBack }: { mode: Mode; b
 
         {mode === "repack" && booking && (
           <View style={[styles.footer, { backgroundColor: t.bg, borderTopColor: t.border, paddingBottom: insets.bottom + 12 }]}>
-            <Button
-              title={saving && !draft ? "Saving…" : "Confirm"}
-              icon={CheckCircle2}
-              onPress={confirmRepack}
-              loading={saving}
-              disabled={staged.length === 0}
-            />
+            {repackDone ? (
+              <Button title="Go back" onPress={onDone ?? onBack} />
+            ) : (
+              <Button
+                title={saving && !draft ? "Saving…" : "Confirm"}
+                icon={CheckCircle2}
+                onPress={confirmRepack}
+                loading={saving}
+                disabled={staged.length === 0}
+              />
+            )}
+          </View>
+        )}
+
+        {/* Package ready: once every bundle has its packing list, offer the way back. */}
+        {mode === "ready" && booking && !draft && allPacked && (
+          <View style={[styles.footer, { backgroundColor: t.bg, borderTopColor: t.border, paddingBottom: insets.bottom + 12 }]}>
+            <Button title="Go back" onPress={onDone ?? onBack} />
           </View>
         )}
       </KeyboardAvoidingView>
+
+      <ConfirmDialog
+        visible={savedPopup !== null}
+        icon={CheckCircle2}
+        tone="success"
+        title={savedPopup?.title ?? ""}
+        message={savedPopup?.message}
+        confirmLabel="OK"
+        cancelLabel={null}
+        onConfirm={() => setSavedPopup(null)}
+        onCancel={() => setSavedPopup(null)}
+      >
+        <ScrollView style={{ alignSelf: "stretch", maxHeight: 320, marginTop: 14 }}>
+          {savedPopup?.bundles.map((b) => (
+            <View key={b.bundleNo} style={[styles.popupBundle, { borderColor: t.border }]}>
+              <View style={styles.addedHead}>
+                <View>
+                  <Txt size={11} muted uppercase weight="semibold">
+                    Bundle mark ID
+                  </Txt>
+                  <Txt mono size={26} weight="bold" color={t.code}>
+                    {b.mark ?? "—"}
+                  </Txt>
+                </View>
+                <Txt size={12.5} muted weight="semibold">
+                  Bundle {b.bundleNo}
+                </Txt>
+              </View>
+              {b.lines.map((l, i) => (
+                <View key={i} style={styles.popupLine}>
+                  <Txt size={13} style={{ flex: 1 }} numberOfLines={2}>
+                    {l.product || "—"}
+                  </Txt>
+                  <Txt size={13} weight="bold">
+                    × {l.qty}
+                  </Txt>
+                </View>
+              ))}
+            </View>
+          ))}
+        </ScrollView>
+      </ConfirmDialog>
     </Screen>
   );
 }
@@ -605,27 +731,55 @@ function DraftEditor({
   );
 }
 
-function BundleChip({ n, saved, active, onPress }: { n: number; saved: boolean; active: boolean; onPress: () => void }) {
+type PopupLine = { product: string; qty: string };
+
+/** Bundle mark IDs of one booking's saved bundles, by bundle no — every saved bundle across all packing lists numbered in id order, like the web. */
+function bundleMarks(packages: { booking: string; bundles: { id: string; bundleNo: number }[] }[], bookingId: string): Map<number, number> {
+  const markOf = new Map(
+    packages
+      .flatMap((p) => p.bundles.map((x) => x.id))
+      .filter(Boolean)
+      .sort()
+      .map((id, i) => [id, i + 1] as const)
+  );
+  const own = packages.find((p) => p.booking === bookingId)?.bundles ?? [];
+  return new Map(own.map((b) => [b.bundleNo, markOf.get(b.id)]).filter((e): e is [number, number] => e[1] !== undefined));
+}
+
+function BundleChip({ n, saved, mark, active, onPress }: { n: number; saved: boolean; mark?: number; active: boolean; onPress: () => void }) {
   const t = useTheme();
   if (!saved) return <Chip label={`Bundle ${n}`} active={active} onPress={onPress} />;
   // Saved bundles can't be picked again, same as the web's "(saved)" options.
   return (
-    <View style={[styles.savedChip, { borderColor: t.border, backgroundColor: t.tones.success.bg }]} accessibilityLabel={`Bundle ${n}, saved`}>
+    <View style={[styles.savedChip, { borderColor: t.border, backgroundColor: t.tones.success.bg }]} accessibilityLabel={`Bundle ${n}, saved${mark ? `, mark ${mark}` : ""}`}>
       <Check size={13} color={t.tones.success.fg} strokeWidth={2.6} />
       <Txt size={13} weight="semibold" color={t.tones.success.fg}>
         Bundle {n}
+        {mark !== undefined ? ` · Mark ${mark}` : ""}
       </Txt>
     </View>
   );
 }
 
-function AddedBundle({ bundleNo, lines }: { bundleNo: number; lines: { product: string; fabric: string; qty: string; description: string }[] }) {
+function AddedBundle({
+  bundleNo,
+  mark,
+  lines,
+}: {
+  bundleNo: number;
+  /** Bundle mark ID, once the bundle is saved. */
+  mark?: number;
+  lines: { product: string; fabric: string; qty: string; description: string }[];
+}) {
   const t = useTheme();
   return (
     <Card style={{ marginBottom: 10 }}>
-      <Txt size={13.5} weight="bold" style={{ marginBottom: 6 }}>
-        Bundle {bundleNo}
-      </Txt>
+      <View style={[styles.addedHead, { marginBottom: 6 }]}>
+        <Txt size={13.5} weight="bold">
+          Bundle {bundleNo}
+        </Txt>
+        {mark !== undefined && <Badge label={`Mark ${mark}`} tone="info" size="sm" />}
+      </View>
       {lines.length === 0 ? (
         <Txt size={12.5} muted>
           No items
@@ -670,6 +824,9 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   line: { borderWidth: 1, borderRadius: radius.md, padding: 12, marginTop: 4, marginBottom: 10 },
   addedLine: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 8 },
+  addedHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  popupBundle: { borderWidth: 1, borderRadius: radius.md, padding: 12, marginBottom: 8 },
+  popupLine: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 6 },
   savedChip: { flexDirection: "row", alignItems: "center", gap: 5, height: 34, paddingHorizontal: 14, borderRadius: radius.pill, borderWidth: 1, marginRight: 8 },
   note: { flexDirection: "row", alignItems: "center", gap: 8, padding: 10, borderRadius: 10, marginBottom: 12 },
   footer: { paddingHorizontal: 20, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },

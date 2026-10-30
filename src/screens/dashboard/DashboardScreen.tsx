@@ -25,6 +25,7 @@ import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { TabScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { selectFinanceMode } from "@/store/slices/authSlice";
 import { selectBookingStats, selectBookingsSorted } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
@@ -43,6 +44,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
   const stats = useAppSelector(selectBookingStats);
   const recent = useAppSelector(selectBookingsSorted).slice(0, 5);
   const bookingsState = useAppSelector((s) => s.bookings);
+  const financeMode = useAppSelector(selectFinanceMode);
   const containers = useAppSelector((s) => s.containers.items);
   const expenses = useAppSelector((s) => s.finance.expenses);
   const team = useAppSelector((s) => s.masters.team.items);
@@ -70,7 +72,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
   const readyTotal = stats.counts.ready + stats.counts.readyToStuff;
   const pipelineTotal = Math.max(1, stats.total);
 
-  const goBookings = (filter?: "repacking" | "ready" | "stuffed") => navigation.navigate("Bookings", { filter: filter ?? "all" });
+  const goBookings = (filter?: "packingList" | "readyToStuff" | "stuffed") => navigation.navigate("Bookings", { filter: filter ?? "all" });
 
   return (
     <Screen>
@@ -96,7 +98,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
             icon={Bell}
             dot={stats.counts.repacking > 0}
             accessibilityLabel="Bookings needing repacking"
-            onPress={() => goBookings("repacking")}
+            onPress={() => goBookings("packingList")}
           />
         </View>
 
@@ -129,29 +131,31 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
             )}
           </View>
           <View style={styles.heroTiles}>
-            <HeroTile value={stats.counts.repacking} label="Repacking" onPress={() => goBookings("repacking")} />
-            <HeroTile value={readyTotal} label="Ready to ship" onPress={() => goBookings("ready")} />
+            <HeroTile value={stats.counts.repacking} label="Repacking" onPress={() => goBookings("packingList")} />
+            <HeroTile value={readyTotal} label="Package ready" onPress={() => goBookings("readyToStuff")} />
             <HeroTile value={stuffedTotal} label="Stuffed" onPress={() => goBookings("stuffed")} />
           </View>
         </LinearGradient>
 
-        {/* Quick actions */}
-        <View style={styles.quick}>
-          <QuickAction icon={ClipboardList} label={"New\nbooking"} tone="info" onPress={() => navigation.navigate("NewBooking")} />
-          <QuickAction
-            icon={Truck}
-            label="Pickup"
-            tone="success"
-            onPress={() => navigation.navigate("More", { screen: "MasterList", params: { masterKey: "pickupAssigns" }, initial: false })}
-          />
-          <QuickAction icon={ArrowLeftRight} label="Stuffing" tone="purple" onPress={() => navigation.navigate("Stuffing")} />
-          <QuickAction
-            icon={FileText}
-            label="Invoice"
-            tone="warning"
-            onPress={() => navigation.navigate("More", { screen: "Finance", params: { tab: "invoices" }, initial: false })}
-          />
-        </View>
+        {/* Quick actions (booking work — hidden in finance mode) */}
+        {!financeMode && (
+          <View style={styles.quick}>
+            <QuickAction icon={ClipboardList} label={"New\nbooking"} tone="info" onPress={() => navigation.navigate("NewBooking")} />
+            <QuickAction
+              icon={Truck}
+              label="Pickup"
+              tone="success"
+              onPress={() => navigation.navigate("More", { screen: "MasterList", params: { masterKey: "pickupAssigns" }, initial: false })}
+            />
+            <QuickAction icon={ArrowLeftRight} label="Stuffing" tone="purple" onPress={() => navigation.navigate("Stuffing")} />
+            <QuickAction
+              icon={FileText}
+              label="Invoice"
+              tone="warning"
+              onPress={() => navigation.navigate("More", { screen: "Finance", params: { tab: "invoices" }, initial: false })}
+            />
+          </View>
+        )}
 
         {/* Pipeline */}
         <SectionTitle title="Shipment pipeline" action="Details" onAction={() => goBookings()} />
@@ -190,25 +194,29 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           <TodayTile icon={Users} tone="purple" value={String(activeStaff)} label="Active staff" />
         </View>
 
-        {/* Recent */}
-        <SectionTitle title="Recent bookings" action="See all" onAction={() => goBookings()} />
-        <Card padded={false}>
-          {recent.length === 0 ? (
-            <Txt muted align="center" style={{ padding: 24 }}>
-              {bookingsState.status === "loading" ? "Loading bookings…" : "No bookings yet."}
-            </Txt>
-          ) : (
-            recent.map((b, i) => (
-              <BookingRow
-                key={b.id}
-                booking={b}
-                city={receiverCity(b)}
-                last={i === recent.length - 1}
-                onPress={() => navigation.navigate("BookingDetail", { id: b.id })}
-              />
-            ))
-          )}
-        </Card>
+        {/* Recent (hidden in finance mode) */}
+        {!financeMode && (
+          <>
+            <SectionTitle title="Recent bookings" action="See all" onAction={() => goBookings()} />
+            <Card padded={false}>
+              {recent.length === 0 ? (
+                <Txt muted align="center" style={{ padding: 24 }}>
+                  {bookingsState.status === "loading" ? "Loading bookings…" : "No bookings yet."}
+                </Txt>
+              ) : (
+                recent.map((b, i) => (
+                  <BookingRow
+                    key={b.id}
+                    booking={b}
+                    city={receiverCity(b)}
+                    last={i === recent.length - 1}
+                    onPress={() => navigation.navigate("BookingDetail", { id: b.id })}
+                  />
+                ))
+              )}
+            </Card>
+          </>
+        )}
       </ScrollView>
     </Screen>
   );
@@ -278,7 +286,15 @@ const styles = StyleSheet.create({
   hero: { borderRadius: 24, padding: 18, overflow: "hidden" },
   heroWatermark: { position: "absolute", right: -18, top: 6 },
   heroValue: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
-  growth: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(255,255,255,0.14)", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
+  growth: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
   heroTiles: { flexDirection: "row", gap: 10, marginTop: 16 },
   heroTile: {
     flex: 1,

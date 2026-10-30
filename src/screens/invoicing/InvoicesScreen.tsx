@@ -18,24 +18,20 @@ import { useRefresh } from "@/hooks/useBootstrapData";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import { financeService } from "@/services/financeService";
-import { num, str } from "@/services/mappers";
+import { num, refField, refId, str } from "@/services/mappers";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { selectPackingByBooking } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
 import { fetchFinance } from "@/store/slices/financeSlice";
 import { fetchMaster, saveMaster } from "@/store/slices/mastersSlice";
+import { ensureMaster } from "@/store/ensure";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { BackendDoc, Booking, Invoice } from "@/types";
 import { fullDate, money } from "@/utils/format";
 import { downloadInvoicePdf } from "@/utils/invoicePdf";
-
-/** Same aliases as the web console's canonicalPlace, so "Dubai" or "U.A.E" still match the UAE route. */
-const PLACE_ALIASES: Record<string, string> = { india: "India", uae: "UAE", "u.a.e": "UAE", "u.a.e.": "UAE", "united arab emirates": "UAE", dubai: "UAE" };
-const canonicalPlace = (v: unknown) => {
-  const s = str(v).trim().replace(/\s+/g, " ");
-  return PLACE_ALIASES[s.toLowerCase()] ?? s;
-};
-const isIndiaToUae = (p: BackendDoc) => canonicalPlace(p.from) === "India" && canonicalPlace(p.to) === "UAE";
+import { canonicalPlace, isIndiaToUae } from "@/utils/pricing";
+import { docToFormValues, MASTERS } from "@/features/masters/config";
 
 export function InvoicesScreen() {
   const t = useTheme();
@@ -47,20 +43,28 @@ export function InvoicesScreen() {
   const pricing = useAppSelector((s) => s.masters.pricing.items);
   const partners = useAppSelector((s) => s.masters.deliveryPartners.items);
   const customers = useAppSelector((s) => s.masters.customers.items);
+  const countries = useAppSelector((s) => s.masters.countries.items);
+  const products = useAppSelector((s) => s.masters.products.items);
+  const packing = useAppSelector(selectPackingByBooking);
   const lookup = useCustomerLookup();
 
   const [containerId, setContainerId] = useState("");
   const [bookingId, setBookingId] = useState("");
-  const [partnerId, setPartnerId] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [savingPrice, setSavingPrice] = useState(false);
+  const [newCharge, setNewCharge] = useState("");
+  // Chosen delivery partner; empty means the suggested one.
+  const [partnerId, setPartnerId] = useState("");
+  const [savingCharge, setSavingCharge] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [printingId, setPrintingId] = useState<string | null>(null);
 
   useEffect(() => {
-    dispatch(fetchMaster("pricing"));
-    dispatch(fetchMaster("deliveryPartners"));
-    dispatch(fetchMaster("customers"));
+    dispatch(ensureMaster("pricing"));
+    dispatch(ensureMaster("deliveryPartners"));
+    dispatch(ensureMaster("customers"));
+    dispatch(ensureMaster("countries"));
+    dispatch(ensureMaster("products"));
   }, [dispatch]);
 
   const load = useCallback(
@@ -90,24 +94,52 @@ export function InvoicesScreen() {
   const subtotal = rate * qty;
   const additional = booking ? booking.pickupCharge + booking.brandHandlingCharge : 0;
   const discount = booking ? num(customers.find((c) => c._id === booking.receiver.id)?.discount) : 0;
+  // Delivery partner: choosable like the web (until the invoice exists). It starts on the active partner
+  // serving the receiver's country (from India when there's a choice); other active partners follow.
+  const countryName = (ref: unknown) => canonicalPlace(refField(ref, "name") ?? countries.find((c) => c._id === refId(ref))?.name);
+  const receiverCountry = booking ? canonicalPlace(lookup.receiverCountry(booking)) : "";
+  const activePartners = partners.filter((p) => p.status !== false);
+  const matchingPartners = receiverCountry ? activePartners.filter((p) => countryName(p.toCountry) === receiverCountry) : [];
+  const suggestedPartner = matchingPartners.find((p) => countryName(p.from) === "India") ?? matchingPartners[0];
+  const partner = activePartners.find((p) => p._id === partnerId) ?? suggestedPartner;
+  const partnerChoices = [...matchingPartners, ...activePartners.filter((p) => !matchingPartners.includes(p))].map((p) => ({
+    value: p._id,
+    label: str(p.name),
+    sublabel: [`${countryName(p.from) || "—"} → ${countryName(p.toCountry) || "—"}`, p.charge !== undefined && p.charge !== null && String(p.charge) !== "" ? money(num(p.charge)) : "no charge yet"].join(" · "),
+  }));
+  // The charge lives on the delivery partner; when the partner has none yet it's entered here once.
+  const partnerHasCharge = partner !== undefined && partner.charge !== undefined && partner.charge !== null && String(partner.charge) !== "";
+  const deliveryCharge = invoice ? invoice.deliveryCharge : partnerHasCharge ? num(partner!.charge) : undefined;
+  const needsCharge = !invoice && partner !== undefined && !partnerHasCharge;
   const problem = !booking
     ? ""
-    : qty <= 0
-      ? "Repacking hasn't been confirmed for this booking yet — the invoice needs its final bundle count."
-      : !route
-        ? `No India → UAE price for "${booking.bundleType || "this unit"}" yet${pricedUnits.length ? ` (priced so far: ${pricedUnits.join(", ")})` : ""}.`
-        : discount > subtotal + additional
-          ? "The receiver's discount is larger than the invoice amount."
-          : "";
+    : !invoice && !partner
+      ? activePartners.length
+        ? "Choose a delivery partner."
+        : "No active delivery partners yet — add one under More → Delivery."
+      : qty <= 0
+        ? "Repacking hasn't been confirmed for this booking yet — the invoice needs its final bundle count."
+        : !route
+          ? `No India → UAE price for "${booking.bundleType || "this unit"}" yet${pricedUnits.length ? ` (priced so far: ${pricedUnits.join(", ")})` : ""}.`
+          : discount > subtotal + additional
+            ? "The receiver's discount is larger than the invoice amount."
+            : needsCharge
+              ? `Add ${str(partner?.name) || "the delivery partner"}'s charge below before generating the invoice.`
+              : "";
 
   const receiverParty = (b?: Booking) => ({
     name: b?.receiver.name ?? "",
-    lines: b ? [lookup.receiverPlace(b), lookup.map.get(b.receiver.id)?.whatsapp ? `Ph: ${lookup.map.get(b.receiver.id)?.whatsapp}` : ""] : [],
+    lines: b
+      ? [lookup.receiverPlace(b), lookup.map.get(b.receiver.id)?.whatsapp ? `Ph: ${lookup.map.get(b.receiver.id)?.whatsapp}` : ""]
+      : [],
   });
 
   const printInvoice = async (inv: Invoice) => {
     const b = bookings.find((x) => x.id === inv.bookingId);
-    await downloadInvoicePdf(inv, b, receiverParty(b));
+    await downloadInvoicePdf(inv, b, receiverParty(b), {
+      marks: (packing.get(inv.bookingId)?.marks ?? []).join(", "),
+      productName: (id) => str(products.find((p) => p._id === id)?.name),
+    });
   };
 
   const generate = async () => {
@@ -118,8 +150,12 @@ export function InvoicesScreen() {
         await printInvoice(invoice);
         return;
       }
-      if (!partnerId) return Alert.alert("Choose a delivery partner.");
-      const created = await financeService.createInvoice({ containerId: container.id, bookingId: booking.id, deliveryPartnerId: partnerId });
+      if (!partner) return;
+      const created = await financeService.createInvoice({
+        containerId: container.id,
+        bookingId: booking.id,
+        deliveryPartnerId: partner._id,
+      });
       await dispatch(fetchFinance());
       await printInvoice(created);
     } catch (e) {
@@ -132,10 +168,23 @@ export function InvoicesScreen() {
   const addPrice = async () => {
     if (!booking?.bundleType || !(Number(newPrice) > 0)) return;
     setSavingPrice(true);
-    const result = await dispatch(saveMaster({ key: "pricing", values: { from: "India", to: "UAE", uom: booking.bundleType, price: newPrice } }));
+    const result = await dispatch(
+      saveMaster({ key: "pricing", values: { from: "India", to: "UAE", uom: booking.bundleType, price: newPrice } })
+    );
     setSavingPrice(false);
     if (saveMaster.rejected.match(result)) Alert.alert("Couldn't save the price", String(result.payload ?? "Please try again."));
     else setNewPrice("");
+  };
+
+  /** Saves the delivery partner's charge (only offered while it has none); it's read-only here afterwards. */
+  const addCharge = async () => {
+    if (!partner || !(Number(newCharge) >= 0) || newCharge === "") return;
+    setSavingCharge(true);
+    const values = { ...docToFormValues(MASTERS.deliveryPartners, partner), charge: newCharge };
+    const result = await dispatch(saveMaster({ key: "deliveryPartners", id: partner._id, values }));
+    setSavingCharge(false);
+    if (saveMaster.rejected.match(result)) Alert.alert("Couldn't save the charge", String(result.payload ?? "Please try again."));
+    else setNewCharge("");
   };
 
   const reprint = async (inv: Invoice) => {
@@ -155,157 +204,219 @@ export function InvoicesScreen() {
     <Screen>
       <LargeHeader title="Invoices" />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
-      <ScrollView
-        ref={scrollRef}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 30 }}
-        keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
-      >
-        {financeError && <Notice message={financeError} onRetry={() => dispatch(fetchFinance())} />}
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 30 }}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
+        >
+          {financeError && <Notice message={financeError} onRetry={() => dispatch(fetchFinance())} />}
 
-        <Card>
-          <Txt size={16} weight="bold">
-            Generate invoice
-          </Txt>
-          <Txt size={12.5} muted style={{ marginTop: 2, marginBottom: 14 }}>
-            Amounts are calculated by the server from the booking, its route price and the receiver's discount.
-          </Txt>
+          <Card>
+            <Txt size={16} weight="bold">
+              Generate invoice
+            </Txt>
+            <Txt size={12.5} muted style={{ marginTop: 2, marginBottom: 14 }}>
+              Amounts are calculated by the server from the booking, its route price and the receiver's discount.
+            </Txt>
 
-          <SelectField
-            label="Container"
-            placeholder="Choose a container"
-            value={containerId}
-            options={stuffedContainers.map((c) => ({ value: c.id, label: c.code, sublabel: c.company }))}
-            onChange={(v) => {
-              setContainerId(v);
-              setBookingId("");
-              setPartnerId("");
-            }}
-            emptyText="No stuffed containers yet."
-          />
-          {container && (
             <SelectField
-              label="Booking ID"
-              placeholder="Choose booking ID"
-              value={bookingId}
-              options={containerBookings.map((b) => ({ value: b.id, label: b.code, sublabel: `${b.sender.name} → ${b.receiver.name}` }))}
+              label="Container"
+              placeholder="Choose a container"
+              value={containerId}
+              options={stuffedContainers.map((c) => ({ value: c.id, label: c.code, sublabel: c.company }))}
               onChange={(v) => {
-                setBookingId(v);
+                setContainerId(v);
+                setBookingId("");
                 setPartnerId("");
-                setNewPrice("");
               }}
-              emptyText="No bookings in this container."
+              emptyText="No stuffed containers yet."
             />
-          )}
+            {container && (
+              <SelectField
+                label="Booking ID"
+                placeholder="Choose booking ID"
+                value={bookingId}
+                options={containerBookings.map((b) => ({ value: b.id, label: b.code, sublabel: `${b.sender.name} → ${b.receiver.name}` }))}
+                onChange={(v) => {
+                  setBookingId(v);
+                  setNewPrice("");
+                  setNewCharge("");
+                  setPartnerId("");
+                }}
+                emptyText="No bookings in this container."
+              />
+            )}
 
-          {booking && (
-            <>
-              <View style={{ marginVertical: 4 }}>
-                <TotalRow
-                  label={`Route price (${route ? `${canonicalPlace(route.from)} → ${canonicalPlace(route.to)}, per ${str(route.uom)}` : "no route matched"})`}
-                  value={`${money(invoice ? (qty ? invoice.subtotal / qty : 0) : rate)} × ${qty}`}
-                />
-                <TotalRow label="Subtotal" value={money(invoice?.subtotal ?? subtotal)} />
-                <TotalRow label="Additional charges (pickup + brand handling)" value={money(invoice?.additionalCharges ?? additional)} />
-                <TotalRow label="Receiver discount" value={`-${money(invoice?.receivableDiscount ?? discount)}`} />
-              </View>
+            {booking && (
+              <>
+                <View style={{ marginVertical: 4 }}>
+                  <TotalRow label="Receiver" value={booking.receiver.name || "—"} />
+                  <TotalRow label="Receiver country" value={lookup.receiverCountry(booking) || "—"} />
+                  <TotalRow
+                    label={`Route price (${route ? `${canonicalPlace(route.from)} → ${canonicalPlace(route.to)}, per ${str(route.uom)}` : "no route matched"})`}
+                    value={`${money(invoice ? (qty ? invoice.subtotal / qty : 0) : rate)} × ${qty}`}
+                  />
+                  <TotalRow label="Subtotal" value={money(invoice?.subtotal ?? subtotal)} />
+                  <TotalRow label="Additional charges (pickup + brand handling)" value={money(invoice?.additionalCharges ?? additional)} />
+                  <TotalRow label="Receiver discount" value={`-${money(invoice?.receivableDiscount ?? discount)}`} />
+                </View>
 
-              {invoice ? (
-                <TextField label="Delivery partner" value={invoice.deliveryPartner ?? ""} editable={false} />
-              ) : (
-                <SelectField
-                  label="Delivery partner"
-                  placeholder="Choose delivery partner"
-                  value={partnerId}
-                  options={partners.filter((p) => p.status !== false).map((p) => ({ value: p._id, label: str(p.name) }))}
-                  onChange={setPartnerId}
-                  emptyText="No delivery partners yet — add one under More → Delivery partners."
-                />
-              )}
-
-              <DashedDivider />
-              <TotalRow label="Total" value={money(invoice?.amount ?? subtotal + additional - discount)} strong />
-
-              {invoice ? (
-                <Txt size={12.5} muted style={{ marginTop: 6 }}>
-                  Already invoiced as <Txt size={12.5} weight="bold">{invoice.code}</Txt>
-                  {invoice.createdAt ? ` on ${fullDate(invoice.createdAt)}` : ""} — downloading reprints the saved invoice.
-                </Txt>
-              ) : problem ? (
-                <Txt size={12.5} color={t.tones.danger.fg} style={{ marginTop: 6 }}>
-                  {problem}
-                </Txt>
-              ) : null}
-
-              {!invoice && qty > 0 && !route && booking.bundleType && (
-                <View style={styles.priceRow}>
-                  <View style={{ flex: 1 }}>
-                    <TextField
-                      label={`India → UAE price per ${booking.bundleType}`}
-                      value={newPrice}
-                      onChangeText={(v) => setNewPrice(v.replace(/[^\d.]/g, ""))}
-                      keyboardType="decimal-pad"
-                      placeholder="Price"
+                {invoice ? (
+                  <TextField label="Delivery partner" value={invoice.deliveryPartner || "—"} editable={false} hint="Already invoiced — can't be changed." />
+                ) : (
+                  <SelectField
+                    label="Delivery partner"
+                    placeholder="Choose delivery partner"
+                    value={partner?._id ?? ""}
+                    options={partnerChoices}
+                    onChange={(v) => {
+                      setPartnerId(v);
+                      setNewCharge("");
+                    }}
+                    emptyText="No active delivery partners — add one under More → Delivery."
+                  />
+                )}
+                {deliveryCharge !== undefined && <TotalRow label="Delivery partner charges" value={money(deliveryCharge)} />}
+                {needsCharge && (
+                  <View style={styles.priceRow}>
+                    <View style={{ flex: 1 }}>
+                      <TextField
+                        label="Delivery partner charge (AED)"
+                        value={newCharge}
+                        onChangeText={(v) => setNewCharge(v.replace(/[^\d.]/g, ""))}
+                        keyboardType="decimal-pad"
+                        placeholder="Charge"
+                        hint="Saved to this partner once; it can't be changed here later."
+                      />
+                    </View>
+                    <Button
+                      title="Save"
+                      variant="secondary"
+                      height={50}
+                      onPress={addCharge}
+                      loading={savingCharge}
+                      disabled={newCharge === "" || !(Number(newCharge) >= 0)}
+                      style={{ marginBottom: 14 }}
                     />
                   </View>
-                  <Button title="Add price" variant="secondary" height={50} onPress={addPrice} loading={savingPrice} disabled={!(Number(newPrice) > 0)} style={{ marginBottom: 14 }} />
-                </View>
-              )}
+                )}
 
-              <Button
-                title={invoice ? "Download invoice PDF" : "Generate & download invoice PDF"}
-                icon={Download}
-                onPress={generate}
-                loading={generating}
-                disabled={!invoice && (!!problem || !partnerId)}
-                style={{ marginTop: 12 }}
-              />
-              {!invoice && !problem && !partnerId && (
-                <Txt size={12} muted align="center" style={{ marginTop: 6 }}>
-                  Choose a delivery partner to generate the invoice.
-                </Txt>
-              )}
-            </>
-          )}
-        </Card>
+                <DashedDivider />
+                <TotalRow label="Total" value={money(invoice?.amount ?? subtotal + additional - discount)} strong />
 
-        <SectionTitle title="Invoices" />
-        <Card padded={false}>
-          {sortedInvoices.length === 0 ? (
-            <Txt muted align="center" style={{ padding: 24 }}>
-              No invoices yet.
-            </Txt>
-          ) : (
-            sortedInvoices.map((inv, i) => (
-              <View key={inv.id} style={[styles.invoiceRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: t.border }]}>
-                <IconTile icon={FileText} tone="info" size={40} />
-                <View style={{ flex: 1, marginHorizontal: 12 }}>
-                  <Txt size={14} weight="bold" mono>
-                    {inv.code}
-                  </Txt>
-                  <Txt size={12} muted numberOfLines={1}>
-                    {[inv.bookingCode, inv.container, inv.deliveryPartner].filter(Boolean).join(" · ")}
-                  </Txt>
-                  <Txt size={12} muted>
-                    {inv.createdAt ? fullDate(inv.createdAt) : "—"}
-                  </Txt>
-                </View>
-                <View style={{ alignItems: "flex-end", gap: 6 }}>
-                  <Txt size={14} weight="bold">
-                    {money(inv.amount)}
-                  </Txt>
-                  <Pressable onPress={() => reprint(inv)} disabled={printingId === inv.id} hitSlop={8} style={styles.pdfBtn} accessibilityLabel={`Download ${inv.code} PDF`}>
-                    {printingId === inv.id ? <ActivityIndicator size="small" color={t.primary} /> : <Download size={14} color={t.primary} />}
-                    <Txt size={12.5} weight="semibold" color={t.primary}>
-                      PDF
+                {invoice ? (
+                  <Txt size={12.5} muted style={{ marginTop: 6 }}>
+                    Already invoiced as{" "}
+                    <Txt size={12.5} weight="bold">
+                      {invoice.code}
                     </Txt>
-                  </Pressable>
-                </View>
-              </View>
-            ))
-          )}
-        </Card>
-      </ScrollView>
+                    {invoice.createdAt ? ` on ${fullDate(invoice.createdAt)}` : ""} — downloading reprints the saved invoice.
+                  </Txt>
+                ) : problem ? (
+                  <Txt size={12.5} color={t.tones.danger.fg} style={{ marginTop: 6 }}>
+                    {problem}
+                  </Txt>
+                ) : null}
+
+                {!invoice && qty > 0 && !route && booking.bundleType && (
+                  <View style={styles.priceRow}>
+                    <View style={{ flex: 1 }}>
+                      <TextField
+                        label={`India → UAE price per ${booking.bundleType}`}
+                        value={newPrice}
+                        onChangeText={(v) => setNewPrice(v.replace(/[^\d.]/g, ""))}
+                        keyboardType="decimal-pad"
+                        placeholder="Price"
+                      />
+                    </View>
+                    <Button
+                      title="Add price"
+                      variant="secondary"
+                      height={50}
+                      onPress={addPrice}
+                      loading={savingPrice}
+                      disabled={!(Number(newPrice) > 0)}
+                      style={{ marginBottom: 14 }}
+                    />
+                  </View>
+                )}
+
+                <Button
+                  title={invoice ? "Download invoice PDF" : "Generate & download invoice PDF"}
+                  icon={Download}
+                  onPress={generate}
+                  loading={generating}
+                  disabled={!invoice && !!problem}
+                  style={{ marginTop: 12 }}
+                />
+              </>
+            )}
+          </Card>
+
+          <SectionTitle title="Invoices" />
+          <Card padded={false}>
+            {sortedInvoices.length === 0 ? (
+              <Txt muted align="center" style={{ padding: 24 }}>
+                No invoices yet.
+              </Txt>
+            ) : (
+              sortedInvoices.map((inv, i) => {
+                const b = bookings.find((x) => x.id === inv.bookingId);
+                return (
+                  <View
+                    key={inv.id}
+                    style={[styles.invoiceRow, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderColor: t.border }]}
+                  >
+                    <IconTile icon={FileText} tone="info" size={40} />
+                    <View style={{ flex: 1, marginHorizontal: 12 }}>
+                      <Txt size={14} weight="bold" mono>
+                        {inv.code}
+                      </Txt>
+                      <Txt size={12} muted numberOfLines={1}>
+                        {[inv.bookingCode, inv.container, inv.deliveryPartner].filter(Boolean).join(" · ")}
+                      </Txt>
+                      {b && (
+                        <Txt size={12} muted numberOfLines={1}>
+                          To {[b.receiver.name, lookup.receiverCountry(b)].filter(Boolean).join(" · ")}
+                        </Txt>
+                      )}
+                      {inv.deliveryCharge !== undefined && (
+                        <Txt size={12} muted>
+                          Delivery charges {money(inv.deliveryCharge)}
+                        </Txt>
+                      )}
+                      <Txt size={12} muted>
+                        {inv.createdAt ? fullDate(inv.createdAt) : "—"}
+                      </Txt>
+                    </View>
+                    <View style={{ alignItems: "flex-end", gap: 6 }}>
+                      <Txt size={14} weight="bold">
+                        {money(inv.amount)}
+                      </Txt>
+                      <Pressable
+                        onPress={() => reprint(inv)}
+                        disabled={printingId === inv.id}
+                        hitSlop={8}
+                        style={styles.pdfBtn}
+                        accessibilityLabel={`Download ${inv.code} PDF`}
+                      >
+                        {printingId === inv.id ? (
+                          <ActivityIndicator size="small" color={t.primary} />
+                        ) : (
+                          <Download size={14} color={t.primary} />
+                        )}
+                        <Txt size={12.5} weight="semibold" color={t.primary}>
+                          PDF
+                        </Txt>
+                      </Pressable>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </Card>
+        </ScrollView>
       </KeyboardAvoidingView>
     </Screen>
   );

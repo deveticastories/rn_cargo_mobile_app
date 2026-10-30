@@ -19,12 +19,13 @@ import { packageService } from "@/services/packageService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
-import { fetchMaster } from "@/store/slices/mastersSlice";
+import { ensureMaster } from "@/store/ensure";
 import { radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { BackendDoc, Booking } from "@/types";
 import { fullDate } from "@/utils/format";
 import { downloadPdfs } from "@/utils/downloads";
+import { A4_PORTRAIT } from "@/utils/pdfFrame";
 import { deliveryNoteHtml } from "@/utils/tablePdf";
 
 type NoteRow = { bundleNo: string; product: string; qty: string };
@@ -46,9 +47,9 @@ export function DeliveryNotesScreen() {
   const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
-    dispatch(fetchMaster("products"));
-    dispatch(fetchMaster("fabrics"));
-    dispatch(fetchMaster("customers"));
+    dispatch(ensureMaster("products"));
+    dispatch(ensureMaster("fabrics"));
+    dispatch(ensureMaster("customers"));
   }, [dispatch]);
 
   const load = useCallback(() => Promise.all([dispatch(fetchContainers()), dispatch(fetchBookings())]), [dispatch]);
@@ -111,6 +112,7 @@ export function DeliveryNotesScreen() {
       const files = await Promise.all(
         picked.map(async (b) => ({
           fileName: `${b.code}-delivery-note.pdf`,
+          size: A4_PORTRAIT,
           html: deliveryNoteHtml({
             lrNo: b.code,
             bookingDate: fullDate(b.date),
@@ -120,8 +122,8 @@ export function DeliveryNotesScreen() {
           }),
         }))
       );
-      // Saved to Downloads one file per booking; a notification confirms when they're all done.
-      await downloadPdfs(files, { one: "Delivery note", many: "delivery notes" });
+      // Saved to Downloads one file per booking, each with its own notification.
+      await downloadPdfs(files);
     } catch (e) {
       Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {

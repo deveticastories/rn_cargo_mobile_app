@@ -17,8 +17,9 @@ export function bookingStage(b: Booking): BookingStage {
 }
 
 export const STAGE_META: Record<BookingStage, { label: string; short: string; tone: Tone }> = {
-  repacking: { label: "Repacking Required", short: "Repack", tone: "warning" },
-  ready: { label: "Ready to Ship", short: "Ready", tone: "success" },
+  // The stored values are "Repacking Required" / "Ready to Ship"; the web console shows the latter as "Package Ready".
+  repacking: { label: "Repacking required", short: "Repack", tone: "warning" },
+  ready: { label: "Package ready", short: "Ready", tone: "success" },
   readyToStuff: { label: "Ready to Stuff", short: "To stuff", tone: "info" },
   stuffed: { label: "Stuffed", short: "Stuffed", tone: "purple" },
 };
@@ -106,6 +107,31 @@ export const selectReadyToStuff = createSelector([selectBookingsSorted, selectPa
     (b) => b.stuffStatus === "Pending" && (packing.get(b.id)?.bundleNos.size ?? 0) >= Math.max(1, b.actualBundle || b.bundleCount || 1)
   )
 );
+
+export type BookingListTab = "packingList" | "readyToStuff" | "stuffing" | "stuffed";
+
+export const LIST_TAB_META: Record<BookingListTab, { label: string; tone: Tone }> = {
+  packingList: { label: "Packing list", tone: "warning" },
+  readyToStuff: { label: "Ready to stuff", tone: "success" },
+  stuffing: { label: "Stuffing", tone: "info" },
+  stuffed: { label: "Stuffed", tone: "purple" },
+};
+
+/** Bundles on the booking's packing list vs. bundles booked. */
+export function packedProgress(b: Booking, packing: Map<string, { bundleNos: Set<number> }>) {
+  return { packed: packing.get(b.id)?.bundleNos.size ?? 0, total: Math.max(1, b.actualBundle || b.bundleCount || 1) };
+}
+
+/**
+ * Bookings tab: Packing list (bundles still to be added), Ready to stuff
+ * (fully packed), Stuffing (sent to stuffing, waiting for a container), Stuffed.
+ */
+export function bookingListTab(b: Booking, packing: Map<string, { bundleNos: Set<number> }>): BookingListTab {
+  if (b.stuffStatus === "Stuffed") return "stuffed";
+  if (b.stuffStatus === "Ready to Stuff") return "stuffing";
+  const { packed, total } = packedProgress(b, packing);
+  return packed >= total ? "readyToStuff" : "packingList";
+}
 
 /** The stuffing queue: sent from Ready to stuff and waiting for a container. */
 export const selectAwaitingStuffing = createSelector([selectBookingsSorted], (bookings) => bookings.filter((b) => b.stuffStatus === "Ready to Stuff"));

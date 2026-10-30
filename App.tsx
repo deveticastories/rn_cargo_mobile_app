@@ -12,6 +12,7 @@ import { loadTheme } from "@/store/slices/uiSlice";
 import { ThemeProvider } from "@/theme/ThemeProvider";
 import { fontAssets } from "@/theme/fonts";
 import { RootNavigator } from "@/navigation/RootNavigator";
+import { listenForDownloadTaps } from "@/utils/downloads";
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -24,6 +25,9 @@ function Bootstrap() {
     dispatch(loadTheme());
     dispatch(restoreSession());
   }, [dispatch]);
+
+  // Download notifications open their PDF when tapped.
+  useEffect(() => listenForDownloadTaps(), []);
 
   const fontsReady = fontsLoaded || !!fontError;
   const restored = useAppSelector((s) => s.auth.status !== "restoring");

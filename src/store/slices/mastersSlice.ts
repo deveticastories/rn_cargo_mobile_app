@@ -4,12 +4,14 @@
  * customers, pickup partners and pickup assigns from here.
  */
 import { createSlice } from "@reduxjs/toolkit";
-import { errorMessage } from "@/api/client";
+import { api, errorMessage } from "@/api/client";
+import { API_ENDPOINTS } from "@/api/endpoints";
 import { MASTERS, docToFormValues, formValuesToPayload, type MasterKey } from "@/features/masters/config";
 import { masterService } from "@/services/masterService";
 import { nextSequentialCode } from "@/services/mappers";
 import type { BackendDoc, LoadStatus } from "@/types";
 import { createAppAsyncThunk } from "../thunk";
+import { cacheHydrated } from "../cacheActions";
 
 interface MasterEntry {
   items: BackendDoc[];
@@ -73,6 +75,20 @@ export const toggleMasterStatus = createAppAsyncThunk(
   }
 );
 
+/** Records a pickup's collected bundles through cargo-backend's dedicated endpoint, then re-reads the list. */
+export const recordPickupCollected = createAppAsyncThunk(
+  "masters/pickupCollected",
+  async (args: { id: string; collectedBundle: number }, { rejectWithValue }) => {
+    const def = MASTERS.pickupAssigns;
+    try {
+      await api.patch(API_ENDPOINTS.PICKUP_ASSIGNS.COLLECTED(args.id), { pickupStatus: "Collected", collectedBundle: args.collectedBundle });
+      return { key: def.key, items: await masterService.list(def) };
+    } catch (err) {
+      return rejectWithValue(errorMessage(err, "Couldn't save the collected bundles."));
+    }
+  }
+);
+
 export const deleteMaster = createAppAsyncThunk(
   "masters/delete",
   async (args: { key: MasterKey; id: string }, { rejectWithValue }) => {
@@ -90,6 +106,13 @@ const mastersSlice = createSlice({
   initialState,
   reducers: {},
   extraReducers: (builder) => {
+    // Saved data from last time, only until this list has loaded from the server.
+    builder.addCase(cacheHydrated, (state, { payload }) => {
+      for (const [key, items] of Object.entries(payload.masters ?? {}) as [MasterKey, BackendDoc[]][]) {
+        if (state[key] && state[key].status !== "succeeded") state[key].items = items;
+      }
+    });
+
     builder
       .addCase(fetchMaster.pending, (state, { meta }) => {
         state[meta.arg].status = "loading";
@@ -104,6 +127,9 @@ const mastersSlice = createSlice({
         state[meta.arg].error = payload ?? "Couldn't load.";
       })
       .addCase(saveMaster.fulfilled, (state, { payload }) => {
+        state[payload.key].items = payload.items;
+      })
+      .addCase(recordPickupCollected.fulfilled, (state, { payload }) => {
         state[payload.key].items = payload.items;
       })
       .addCase(toggleMasterStatus.pending, (state, { meta }) => {

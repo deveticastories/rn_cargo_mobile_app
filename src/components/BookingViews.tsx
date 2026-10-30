@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, View } from "react-native";
 import Svg, { Line } from "react-native-svg";
 import { Ship } from "lucide-react-native";
 import { bookingStage, STAGE_META } from "@/store/selectors";
+import type { Tone } from "@/theme/palette";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Booking } from "@/types";
 import { shortDate } from "@/utils/format";
@@ -28,15 +29,21 @@ export function BookingCard({
   booking,
   senderPlace,
   receiverPlaceText,
+  packed,
+  status,
   onPress,
 }: {
   booking: Booking;
   senderPlace: string;
   receiverPlaceText: string;
+  /** Packing-list progress, shown while bundles are still being added. */
+  packed?: { packed: number; total: number };
+  /** Badge to show instead of the booking's repacking/stuffing stage. */
+  status?: { label: string; tone: Tone };
   onPress: () => void;
 }) {
   const t = useTheme();
-  const stage = STAGE_META[bookingStage(booking)];
+  const stage = status ?? STAGE_META[bookingStage(booking)];
   return (
     <Card onPress={onPress} style={{ marginBottom: 12 }}>
       <View style={styles.rowBetween}>
@@ -82,6 +89,7 @@ export function BookingCard({
 
       <View style={styles.tags}>
         <Tag label={`${booking.actualBundle || booking.bundleCount} × ${booking.bundleType || "Bundle"}`} />
+        {packed ? <Tag label={`${packed.packed}/${packed.total} packed`} /> : null}
         {booking.productType ? <Tag label={booking.productType} /> : null}
         {booking.billOption ? <Tag label={booking.billOption} /> : null}
         <Tag label={shortDate(booking.date)} />

@@ -3,6 +3,7 @@ import { errorMessage } from "@/api/client";
 import { bookingService, type BookingInput } from "@/services/bookingService";
 import type { Booking, LoadStatus } from "@/types";
 import { createAppAsyncThunk } from "../thunk";
+import { cacheHydrated } from "../cacheActions";
 
 interface BookingsState {
   items: Booking[];
@@ -96,6 +97,11 @@ const bookingsSlice = createSlice({
   initialState,
   reducers: {},
   extraReducers: (builder) => {
+    // Saved data from last time, only until this list has loaded from the server.
+    builder.addCase(cacheHydrated, (state, { payload }) => {
+      if (state.status !== "succeeded" && payload.bookings) state.items = payload.bookings;
+    });
+
     builder
       .addCase(fetchBookings.pending, (state) => {
         state.status = "loading";

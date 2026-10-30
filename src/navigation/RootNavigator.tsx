@@ -26,7 +26,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StatusBar } from "expo-status-bar";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { sessionExpired } from "@/store/slices/authSlice";
+import { selectFinanceMode, sessionExpired } from "@/store/slices/authSlice";
 import { useTheme } from "@/theme/ThemeProvider";
 import { msUntilExpiry } from "@/utils/jwt";
 import { useBootstrapData } from "@/hooks/useBootstrapData";
@@ -41,6 +41,7 @@ import { DeliveryNotesScreen } from "@/screens/invoicing/DeliveryNotesScreen";
 import { InvoicesScreen } from "@/screens/invoicing/InvoicesScreen";
 import { ReadyToShipScreen, RepackingScreen } from "@/screens/packing/BundleWorkspaceScreen";
 import { FinanceScreen } from "@/screens/finance/FinanceScreen";
+import { ReceiptEntryScreen } from "@/screens/finance/ReceiptEntryScreen";
 import { MoreScreen } from "@/screens/more/MoreScreen";
 import { MasterListScreen } from "@/screens/masters/MasterListScreen";
 import { MasterFormScreen } from "@/screens/masters/MasterFormScreen";
@@ -83,15 +84,22 @@ function useSessionTimer() {
 function MainTabs() {
   useBootstrapData();
   useSessionTimer();
+  // Finance mode (More → Finance mode) swaps Bookings / Stuffing for Invoices / Delivery notes.
+  const financeMode = useAppSelector(selectFinanceMode);
   return (
     <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="Home" component={DashboardScreen} />
-      {/* Hidden for now — re-enable to bring the Bookings tab back. */}
-      <Tabs.Screen name="Bookings" component={BookingsScreen} />
-      {/* <Tabs.Screen name="Invoices" component={InvoicesScreen} /> */}
-      {/* <Tabs.Screen name="DeliveryNotes" component={DeliveryNotesScreen} /> */}
-      {/* Hidden for now — re-enable to bring the Stuffing tab back. */}
-      <Tabs.Screen name="Stuffing" component={StuffingScreen} />
+      {financeMode ? (
+        <>
+          <Tabs.Screen name="Invoices" component={InvoicesScreen} />
+          <Tabs.Screen name="DeliveryNotes" component={DeliveryNotesScreen} />
+        </>
+      ) : (
+        <>
+          <Tabs.Screen name="Bookings" component={BookingsScreen} />
+          <Tabs.Screen name="Stuffing" component={StuffingScreen} />
+        </>
+      )}
       {/* Leaving the tab resets its stack, so tapping More again lands on the More screen. */}
       <Tabs.Screen name="More" component={MoreNavigator} options={{ popToTopOnBlur: true }} />
     </Tabs.Navigator>
@@ -138,6 +146,7 @@ export function RootNavigator() {
               options={{ presentation: "fullScreenModal", animation: "slide_from_bottom", gestureEnabled: false }}
             />
             <Stack.Screen name="MasterForm" component={MasterFormScreen} options={{ presentation: "modal" }} />
+            <Stack.Screen name="ReceiptEntry" component={ReceiptEntryScreen} options={{ presentation: "modal" }} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} options={{ animationTypeForReplace: "pop" }} />
