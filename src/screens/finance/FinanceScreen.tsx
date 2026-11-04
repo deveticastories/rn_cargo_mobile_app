@@ -1,33 +1,29 @@
-/** 07 · Finance — invoices, receipts, expenses and petty cash. */
+/** 07 · Finance — invoices, receipts and petty cash (expenses live under More → Masters). */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { KeyboardAvoidingView, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ChartColumn, ChevronLeft, FileText, Plus, Receipt, Wallet, X } from "lucide-react-native";
-import { Button } from "@/components/Button";
+import { RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { ChartColumn, ChevronLeft, FileText, Receipt } from "lucide-react-native";
 import { Badge, Card, IconButton, IconTile, ProgressBar, SectionTitle } from "@/components/primitives";
 import { EmptyView, Notice, Screen } from "@/components/Screen";
 import { Segmented } from "@/components/Segmented";
-import { TextField } from "@/components/TextField";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import type { MoreScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { INVOICE_TONE, invoiceStatus, selectPettyCash, selectReceivedByInvoice } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
-import { addExpense, fetchFinance } from "@/store/slices/financeSlice";
+import { fetchFinance } from "@/store/slices/financeSlice";
 import { useTheme } from "@/theme/ThemeProvider";
-import type { PaymentType } from "@/types";
-import { isSameMonth, money, shortDate, todayISO } from "@/utils/format";
+import { isSameMonth, money, shortDate } from "@/utils/format";
 
-type Tab = "invoices" | "receipts" | "expenses";
-const TABS = ["invoices", "receipts", "expenses"] as const;
-const TAB_LABELS = { invoices: "Invoices", receipts: "Receipts", expenses: "Expenses" } as const;
+type Tab = "invoices" | "receipts";
+const TABS = ["invoices", "receipts"] as const;
+const TAB_LABELS = { invoices: "Invoices", receipts: "Receipts" } as const;
 const PAGE = 8;
 
 export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">) {
   const t = useTheme();
   const dispatch = useAppDispatch();
-  const { invoices, receipts, expenses, error } = useAppSelector((s) => s.finance);
+  const { invoices, receipts, error } = useAppSelector((s) => s.finance);
   const bookings = useAppSelector((s) => s.bookings.items);
   const receivedByInvoice = useAppSelector(selectReceivedByInvoice);
   const pettyCash = useAppSelector(selectPettyCash);
@@ -39,7 +35,6 @@ export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">)
     if (route.params?.tab) setTab(route.params.tab);
   }, [route.params?.tab]);
   const [showAll, setShowAll] = useState(false);
-  const [expenseOpen, setExpenseOpen] = useState(false);
 
   const load = useCallback(() => Promise.all([dispatch(fetchFinance()), dispatch(fetchBookings())]), [dispatch]);
   const { refreshing, onRefresh } = useRefresh(load);
@@ -62,15 +57,12 @@ export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">)
     [invoices, inScope, receivedByInvoice, bookingById]
   );
   const receiptRows = useMemo(() => receipts.filter((r) => inScope(r.receivedDate || r.date)).sort((a, b) => (b.id > a.id ? 1 : -1)), [receipts, inScope]);
-  const expenseRows = useMemo(() => expenses.filter((e) => inScope(e.date)).sort((a, b) => (b.date > a.date ? 1 : -1)), [expenses, inScope]);
 
   const invoiced = invoiceRows.reduce((s, r) => s + r.inv.amount, 0);
   const collected = invoiceRows.reduce((s, r) => s + Math.min(r.received, r.inv.amount), 0);
   const receivedTotal = receiptRows.reduce((s, r) => s + r.receivedAmount, 0);
   const partnerPending = receiptRows.filter((r) => r.deliveryPartnerStatus === "Pending").reduce((s, r) => s + r.deliveryPartnerAmount, 0);
   const balancePending = receiptRows.reduce((s, r) => s + r.balanceAmount, 0);
-  const spent = expenseRows.reduce((s, e) => s + e.amount, 0);
-  const cash = expenseRows.filter((e) => e.paymentType === "Cash").reduce((s, e) => s + e.amount, 0);
 
   const summary = {
     invoices: {
@@ -95,20 +87,9 @@ export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">)
         { label: "Partner payouts due", value: money(partnerPending) },
       ],
     },
-    expenses: {
-      title: `Spent ${scopeLabel}`,
-      value: spent,
-      progress: spent ? cash / spent : 0,
-      left: `${spent ? Math.round((cash / spent) * 100) : 0}% cash`,
-      right: `${expenseRows.length} entries`,
-      tiles: [
-        { label: "Cash · UPI", value: `${money(cash)} · ${money(spent - cash)}` },
-        { label: "Petty cash", value: money(pettyCash), positive: pettyCash >= 0 },
-      ],
-    },
   }[tab];
 
-  const listLength = tab === "invoices" ? invoiceRows.length : tab === "receipts" ? receiptRows.length : expenseRows.length;
+  const listLength = tab === "invoices" ? invoiceRows.length : receiptRows.length;
   const limit = showAll ? Infinity : PAGE;
 
   return (
@@ -181,8 +162,8 @@ export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">)
 
         <SectionTitle
           title={TAB_LABELS[tab]}
-          action={tab === "expenses" ? "+ Add" : listLength > PAGE ? (showAll ? "Show less" : "See all") : undefined}
-          onAction={() => (tab === "expenses" ? setExpenseOpen(true) : setShowAll((s) => !s))}
+          action={listLength > PAGE ? (showAll ? "Show less" : "See all") : undefined}
+          onAction={() => setShowAll((s) => !s)}
         />
 
         <Card padded={false}>
@@ -190,7 +171,7 @@ export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">)
 
           {tab === "invoices" &&
             invoiceRows.slice(0, limit).map(({ inv, status, party }, i, arr) => (
-              <Row
+              <FinanceRow
                 key={inv.id}
                 last={i === arr.length - 1}
                 icon={<IconTile icon={FileText} tone={INVOICE_TONE[status]} size={40} />}
@@ -203,7 +184,7 @@ export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">)
 
           {tab === "receipts" &&
             receiptRows.slice(0, limit).map((r, i, arr) => (
-              <Row
+              <FinanceRow
                 key={r.id}
                 last={i === arr.length - 1}
                 icon={<IconTile icon={Receipt} tone="success" size={40} />}
@@ -214,34 +195,15 @@ export function FinanceScreen({ navigation, route }: MoreScreenProps<"Finance">)
               />
             ))}
 
-          {tab === "expenses" &&
-            expenseRows.slice(0, limit).map((e, i, arr) => (
-              <Row
-                key={e.id}
-                last={i === arr.length - 1}
-                icon={<IconTile icon={Wallet} tone="warning" size={40} />}
-                title={e.type || "Expense"}
-                subtitle={`${shortDate(e.date)}${e.description ? ` · ${e.description}` : ""}`}
-                amount={money(e.amount)}
-                badge={e.paymentType ? <Badge label={e.paymentType} tone="neutral" dot={false} size="sm" /> : null}
-              />
-            ))}
         </Card>
-        {tab === "expenses" && listLength > PAGE && (
-          <Pressable onPress={() => setShowAll((s) => !s)} style={{ alignSelf: "center", padding: 12 }}>
-            <Txt size={13} weight="semibold" color={t.primary}>
-              {showAll ? "Show less" : `See all ${listLength}`}
-            </Txt>
-          </Pressable>
-        )}
       </ScrollView>
 
-      <ExpenseSheet visible={expenseOpen} onClose={() => setExpenseOpen(false)} />
     </Screen>
   );
 }
 
-function Row({
+/** One invoice / receipt / expense line. */
+export function FinanceRow({
   icon,
   title,
   subtitle,
@@ -278,82 +240,11 @@ function Row({
   );
 }
 
-/** Quick "log an expense" sheet — the one finance write that makes sense on a phone. */
-function ExpenseSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
-  const t = useTheme();
-  const insets = useSafeAreaInsets();
-  const dispatch = useAppDispatch();
-  const [type, setType] = useState("");
-  const [amount, setAmount] = useState("");
-  const [paymentType, setPaymentType] = useState<PaymentType>("Cash");
-  const [description, setDescription] = useState("");
-  const [date, setDate] = useState(todayISO());
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const reset = () => {
-    setType("");
-    setAmount("");
-    setDescription("");
-    setDate(todayISO());
-    setErr(null);
-  };
-
-  const save = async () => {
-    if (!type.trim()) return setErr("Expense type is required.");
-    if (!(Number(amount) > 0)) return setErr("Enter an amount above zero.");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setErr("Date must be YYYY-MM-DD.");
-    setSaving(true);
-    const res = await dispatch(addExpense({ date, type: type.trim(), paymentType, amount: Number(amount), description: description.trim() || undefined }));
-    setSaving(false);
-    if (addExpense.fulfilled.match(res)) {
-      reset();
-      onClose();
-    } else setErr(res.payload ?? "Couldn't save the expense.");
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.overlay }]} onPress={onClose} />
-      <KeyboardAvoidingView behavior="padding" style={{ flex: 1, justifyContent: "flex-end" }} pointerEvents="box-none">
-        <View style={[styles.sheet, { backgroundColor: t.bg, paddingBottom: insets.bottom + 16 }]}>
-          <View style={[styles.between, { marginBottom: 14, marginTop: 0 }]}>
-            <Txt size={18} weight="bold">
-              Log expense
-            </Txt>
-            <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Close">
-              <X size={20} color={t.textMuted} />
-            </Pressable>
-          </View>
-          {err && <Notice message={err} tone="danger" />}
-          <TextField label="Type" value={type} onChangeText={setType} placeholder="Fuel, packing material…" />
-          <View style={{ flexDirection: "row", gap: 12 }}>
-            <View style={{ flex: 1 }}>
-              <TextField label="Amount" value={amount} onChangeText={setAmount} keyboardType="numeric" placeholder="0" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <TextField label="Date" value={date} onChangeText={setDate} placeholder="YYYY-MM-DD" />
-            </View>
-          </View>
-          <Txt size={13} weight="semibold" style={{ marginBottom: 7 }}>
-            Paid by
-          </Txt>
-          <Segmented options={["Cash", "UPI"] as const} value={paymentType} onChange={setPaymentType} />
-          <View style={{ height: 14 }} />
-          <TextField label="Description" value={description} onChangeText={setDescription} placeholder="Optional" />
-          <Button title="Save expense" icon={Plus} onPress={save} loading={saving} />
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
 const styles = StyleSheet.create({
   header: { flexDirection: "row", alignItems: "center", paddingHorizontal: 20, paddingTop: 10, paddingBottom: 14 },
   between: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: 8 },
   tiles: { flexDirection: "row", gap: 10, marginTop: 14 },
   tile: { flex: 1, padding: 12, borderRadius: 12 },
   row: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 14 },
-  sheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
 });
 

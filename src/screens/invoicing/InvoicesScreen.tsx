@@ -7,6 +7,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Download, FileText } from "lucide-react-native";
+import { useNavigation } from "@react-navigation/native";
 import { errorMessage } from "@/api/client";
 import { showAlert, showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
@@ -72,7 +73,22 @@ export function InvoicesScreen() {
     () => Promise.all([dispatch(fetchFinance()), dispatch(fetchContainers()), dispatch(fetchBookings()), dispatch(fetchMaster("pricing"))]),
     [dispatch]
   );
-  const { refreshing, onRefresh } = useRefresh(load);
+  /** Back to the form's first state: nothing selected. */
+  const resetForm = useCallback(() => {
+    setContainerId("");
+    setBookingId("");
+    setPartnerId("");
+    setNewPrice("");
+    setNewCharge("");
+  }, []);
+  // Pulling to refresh, or leaving the tab, starts the form over.
+  const reload = useCallback(() => {
+    resetForm();
+    return load();
+  }, [load, resetForm]);
+  const { refreshing, onRefresh } = useRefresh(reload);
+  const navigation = useNavigation();
+  useEffect(() => navigation.addListener("blur", resetForm), [navigation, resetForm]);
   const scrollRef = useRef<ScrollView>(null);
   useTabScrollReset(scrollRef);
 
@@ -93,7 +109,7 @@ export function InvoicesScreen() {
   const rate = route ? num(route.price) : 0;
   const qty = booking ? booking.actualBundle || 0 : 0;
   const subtotal = rate * qty;
-  const additional = booking ? booking.pickupCharge + booking.brandHandlingCharge : 0;
+  const additional = booking ? booking.pickupCharge + booking.brandHandlingCharge + booking.bundleHandlingCharge : 0;
   const discount = booking ? num(customers.find((c) => c._id === booking.receiver.id)?.discount) : 0;
   // Delivery partner: choosable like the web (until the invoice exists). It starts on the active partner
   // serving the receiver's country (from India when there's a choice); other active partners follow.
@@ -127,6 +143,30 @@ export function InvoicesScreen() {
             : needsCharge
               ? `Add ${str(partner?.name) || "the delivery partner"}'s charge below before generating the invoice.`
               : "";
+
+  // TEMP debug: the current selection and the figures the form shows.
+  useEffect(() => {
+    console.log("[Invoices] selection", JSON.stringify({
+      container: container ?? null,
+      booking: booking ?? null,
+      invoice: invoice ?? null,
+      deliveryPartner: partner ?? null,
+      route: route ?? null,
+      figures: {
+        rate,
+        qty,
+        subtotal,
+        pickupCharge: booking?.pickupCharge,
+        brandHandlingCharge: booking?.brandHandlingCharge,
+        bundleHandlingCharge: booking?.bundleHandlingCharge,
+        additional,
+        discount,
+        deliveryCharge,
+        total: invoice?.amount ?? subtotal + additional - discount + (deliveryCharge ?? 0),
+      },
+      problem,
+    }, null, 2));
+  }, [container, booking, invoice, partner, route, rate, qty, subtotal, additional, discount, deliveryCharge, problem]);
 
   const receiverParty = (b?: Booking) => ({
     name: b?.receiver.name ?? "",
@@ -259,7 +299,7 @@ export function InvoicesScreen() {
                     value={`${money(invoice ? (qty ? invoice.subtotal / qty : 0) : rate)} × ${qty}`}
                   />
                   <TotalRow label="Subtotal" value={money(invoice?.subtotal ?? subtotal)} />
-                  <TotalRow label="Additional charges (pickup + brand handling)" value={money(invoice?.additionalCharges ?? additional)} />
+                  <TotalRow label="Additional charges (pickup + brand + bundle handling)" value={money(invoice?.additionalCharges ?? additional)} />
                   <TotalRow label="Receiver discount" value={`-${money(invoice?.receivableDiscount ?? discount)}`} />
                 </View>
 

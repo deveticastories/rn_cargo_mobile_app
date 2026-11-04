@@ -3,7 +3,7 @@ import React, { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Constants from "expo-constants";
-import { ArrowLeftRight, ChartColumn, ChevronRight, FileBarChart, LogOut, ReceiptText, Repeat, Ship } from "lucide-react-native";
+import { ArrowLeftRight, ChartColumn, ChevronRight, FileBarChart, LogOut, ReceiptText, Repeat, Ship, Wallet } from "lucide-react-native";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconTile, SectionTitle } from "@/components/primitives";
 import { LargeHeader, Screen } from "@/components/Screen";
@@ -15,7 +15,7 @@ import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { MoreScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { selectBookingStats } from "@/store/selectors";
-import { logout, selectFinanceMode } from "@/store/slices/authSlice";
+import { logout, selectFinanceMode, selectSuperAdmin } from "@/store/slices/authSlice";
 import { setThemePreference } from "@/store/slices/uiSlice";
 import type { Tone } from "@/theme/palette";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -30,6 +30,7 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
   const { name, email, role } = useCurrentUser();
   const themePreference = useAppSelector((s) => s.ui.themePreference);
   const financeMode = useAppSelector(selectFinanceMode);
+  const superAdmin = useAppSelector(selectSuperAdmin);
   const pendingPickups = useAppSelector(
     (s) => s.masters.pickupAssigns.items.filter((a) => a.pickupStatus !== "Collected" && a.status !== false).length
   );
@@ -65,7 +66,7 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
           </View>
         </Card>
 
-        {/* Masters (finance users only need Containers) */}
+        {/* Masters (finance users only need Expenses and stuffed Containers) */}
         <SectionTitle title="Masters" />
         <View style={[styles.grid, financeMode && { justifyContent: "flex-start", columnGap: 10 }]}>
           {!financeMode &&
@@ -80,6 +81,20 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
                 </Card>
               );
             })}
+          <Card style={styles.gridItem} onPress={() => navigation.navigate("Expenses")}>
+            <IconTile icon={Wallet} tone="warning" size={38} />
+            <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
+              Expenses
+            </Txt>
+          </Card>
+          {!financeMode && (
+            <Card style={styles.gridItem} onPress={() => navigation.navigate("Containers")}>
+              <IconTile icon={Ship} tone="info" size={38} />
+              <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
+                Containers
+              </Txt>
+            </Card>
+          )}
           {/* Stuffed containers are finance-mode work only. */}
           {financeMode && (
             <Card style={styles.gridItem} onPress={() => navigation.navigate("StuffedContainers")}>
@@ -97,6 +112,9 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
               </Txt>
             </Card>
           )}
+          {/* Empty slots fill the last row so its tiles stay in their columns. */}
+          {!financeMode &&
+            Array.from({ length: (3 - ((MASTER_GRID.length + 2) % 3)) % 3 }, (_, i) => <View key={`gap${i}`} style={styles.gridGap} />)}
         </View>
 
         {/* Operations (booking work — hidden in finance mode) */}
@@ -147,8 +165,12 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
         {/* Account */}
         <SectionTitle title="Account" />
         <Card padded={false}>
-          <OpRow icon={FileBarChart} tone="purple" label="Reports" onPress={() => navigation.navigate("BookingReports")} />
-          <OpRow icon={ChartColumn} tone="info" label="Finance" onPress={() => navigation.navigate("Finance")} />
+          {superAdmin && (
+            <>
+              <OpRow icon={FileBarChart} tone="purple" label="Reports" onPress={() => navigation.navigate("BookingReports")} />
+              <OpRow icon={ChartColumn} tone="info" label="Finance" onPress={() => navigation.navigate("Finance")} />
+            </>
+          )}
           <OpRow icon={LogOut} tone="danger" label="Log out" onPress={signOut} destructive last />
         </Card>
         <Txt size={11.5} soft align="center" style={{ marginTop: 14 }}>
@@ -238,6 +260,7 @@ const styles = StyleSheet.create({
   profileAvatar: { width: 56, height: 56, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 10 },
   gridItem: { width: "31.5%", alignItems: "center", paddingVertical: 16, paddingHorizontal: 6 },
+  gridGap: { width: "31.5%" },
   opRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 14 },
   count: { minWidth: 24, height: 24, paddingHorizontal: 7, borderRadius: 12, alignItems: "center", justifyContent: "center" },
   account: {

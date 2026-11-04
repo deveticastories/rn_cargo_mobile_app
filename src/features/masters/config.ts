@@ -92,6 +92,8 @@ export interface MasterDef {
   hasStatus: boolean;
   /** Status kept as an "Active"/"Inactive" string in this field instead of the boolean `status`. */
   statusKey?: string;
+  /** Added from elsewhere (the tab bar's + menu), so its list has no + button. */
+  noListAdd?: boolean;
   fields: FieldDef[];
   primary: (doc: BackendDoc) => string;
   secondary: (doc: BackendDoc) => string;
@@ -364,6 +366,7 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     hasStatus: false,
     dependsOn: ["customers"],
     autoCode: { field: "preBookingId", prefix: "PBK" },
+    noListAdd: true,
     primary: (d) => `${str(d.preBookingId)} · ${str(refField(d.sender, "name"))}`,
     secondary: (d) => join(`${str(d.bundleCount)} × ${str(d.bundleType)}`, d.phoneNumber, str(d.date).slice(0, 10)),
     badge: (d) => {

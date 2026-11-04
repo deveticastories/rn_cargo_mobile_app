@@ -13,7 +13,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Check, CheckCircle2, ChevronLeft, Download, Plus, Save, X } from "lucide-react-native";
+import { Check, CheckCircle2, ChevronLeft, Copy, Download, Plus, Save, X } from "lucide-react-native";
 import { errorMessage } from "@/api/client";
 import { showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
@@ -228,6 +228,24 @@ function BundleWorkspace({
   const actualBundles = booking ? firstCounts.current.get(booking.id) ?? booking.bundleCount : 0;
   const bundleNos = booking ?Array.from({ length: Math.max(1, booking.bundleCount || 1) }, (_, i) => i + 1) : [];
   const allPacked = !loadingList && bundleNos.length > 0 && bundleNos.every((n) => savedNos.has(n));
+
+  // Bundles already added (repacking: saved to "Added bundles"; package ready: saved to the server) — any can be copied into the open one.
+  const copySources: DraftBundle[] =
+    mode === "repack"
+      ? staged
+      : (saved?.bundles ?? []).map((b) => ({
+          bundleNo: b.bundleNo,
+          netWeight: b.netWeight ? String(b.netWeight) : "",
+          grossWeight: b.grossWeight ? String(b.grossWeight) : "",
+          lines: b.lines.map((l) => ({ product: l.productId, qty: String(l.quantity || ""), fabric: l.fabricId ?? "", unit: l.unitId ?? "", description: l.description ?? "" })),
+        }));
+
+  /** Fills the open bundle with another bundle's items and weights; everything stays editable. */
+  const copyFrom = (source: DraftBundle) => {
+    setNotice(`Copied Bundle ${source.bundleNo}'s items — edit anything that's different, then save.`);
+    setError(null);
+    setDraft((d) => (d ? { ...d, netWeight: source.netWeight, grossWeight: source.grossWeight, lines: source.lines.map((l) => ({ ...l })) } : d));
+  };
 
   const openBundle = (bundleNo: number) => {
     setDraftErrors(null);
@@ -526,6 +544,8 @@ function BundleWorkspace({
                   productOptions={productOptions}
                   fabricOptions={fabricOptions}
                   unitOptions={unitOptions}
+                  copySources={copySources.filter((b) => b.bundleNo !== draft.bundleNo && b.lines.some(hasData))}
+                  onCopy={copyFrom}
                   errors={draftErrors}
                   onWeight={(key, v) => setDraft((d) => (d ? { ...d, [key]: decimal(v) } : d))}
                   onLine={updateLine}
@@ -657,6 +677,8 @@ function DraftEditor({
   productOptions,
   fabricOptions,
   unitOptions,
+  copySources,
+  onCopy,
   onWeight,
   onLine,
   onAddLine,
@@ -673,6 +695,8 @@ function DraftEditor({
   productOptions: SelectOption[];
   fabricOptions: SelectOption[];
   unitOptions: SelectOption[];
+  copySources: DraftBundle[];
+  onCopy: (source: DraftBundle) => void;
   onWeight: (key: "netWeight" | "grossWeight", value: string) => void;
   onLine: (i: number, patch: Partial<Line>) => void;
   onAddLine: () => void;
@@ -686,6 +710,21 @@ function DraftEditor({
       <Txt size={15} weight="bold" style={{ marginBottom: 12 }}>
         Packing list — Bundle {draft.bundleNo}
       </Txt>
+      {copySources.length > 0 && (
+        <View style={{ marginBottom: 12 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 }}>
+            <Copy size={14} color={t.textMuted} />
+            <Txt size={12.5} weight="semibold" muted>
+              Same items as
+            </Txt>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            {copySources.map((b) => (
+              <Chip key={b.bundleNo} label={`Bundle ${b.bundleNo}`} active={false} onPress={() => onCopy(b)} />
+            ))}
+          </ScrollView>
+        </View>
+      )}
       <View style={{ flexDirection: "row", gap: 10 }}>
         <View style={{ flex: 1 }}>
           <TextField label="Net wt (kg)" value={draft.netWeight} onChangeText={(v) => onWeight("netWeight", v)} keyboardType="decimal-pad" placeholder="0" error={errors?.netWeight} />

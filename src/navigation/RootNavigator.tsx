@@ -9,9 +9,9 @@
  *   │   ├─ Invoices        (web console's Invoicing: generate invoice)
  *   │   ├─ DeliveryNotes   (web console's Invoicing: generate delivery note)
  *   │   ├─ Stuffing
- *   │   └─ More → stack: MoreHome · Finance · BookingReports · Receipts · MasterList · StuffedContainers · StuffedContainer
+ *   │   └─ More → stack: MoreHome · Finance · Expenses · BookingReports · Receipts · MasterList · StuffedContainers · StuffedContainer
  *   ├─ BookingDetail
- *   ├─ Containers   (from the tab bar's + menu)
+ *   ├─ Containers   (from More → Masters)
  *   ├─ Repacking · ReadyToShip   (packing lists, from Booking detail)
  *   ├─ NewBooking   (modal)
  *   └─ MasterForm   (modal)
@@ -26,7 +26,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { StatusBar } from "expo-status-bar";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { selectFinanceMode, sessionExpired } from "@/store/slices/authSlice";
+import { selectFinanceMode, selectPickupMode, sessionExpired } from "@/store/slices/authSlice";
 import { useTheme } from "@/theme/ThemeProvider";
 import { msUntilExpiry } from "@/utils/jwt";
 import { useBootstrapData } from "@/hooks/useBootstrapData";
@@ -41,11 +41,13 @@ import { DeliveryNotesScreen } from "@/screens/invoicing/DeliveryNotesScreen";
 import { InvoicesScreen } from "@/screens/invoicing/InvoicesScreen";
 import { ReadyToShipScreen, RepackingScreen } from "@/screens/packing/BundleWorkspaceScreen";
 import { FinanceScreen } from "@/screens/finance/FinanceScreen";
+import { ExpenseListScreen, ExpensesScreen } from "@/screens/finance/ExpensesScreen";
+import { ProfileScreen } from "@/screens/more/ProfileScreen";
 import { ReceiptEntryScreen } from "@/screens/finance/ReceiptEntryScreen";
 import { ReceiptsScreen } from "@/screens/finance/ReceiptsScreen";
 import { MoreScreen } from "@/screens/more/MoreScreen";
 import { BookingReportsScreen } from "@/screens/reports/BookingReportsScreen";
-import { MasterListScreen } from "@/screens/masters/MasterListScreen";
+import { MasterListScreen, PickupTabScreen, PreBookingsTabScreen } from "@/screens/masters/MasterListScreen";
 import { MasterFormScreen } from "@/screens/masters/MasterFormScreen";
 import { StuffedContainerScreen } from "@/screens/stuffedContainers/StuffedContainerScreen";
 import { StuffedContainersScreen } from "@/screens/stuffedContainers/StuffedContainersScreen";
@@ -62,6 +64,7 @@ function MoreNavigator() {
     <MoreStack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
       <MoreStack.Screen name="MoreHome" component={MoreScreen} />
       <MoreStack.Screen name="Finance" component={FinanceScreen} />
+      <MoreStack.Screen name="Expenses" component={ExpensesScreen} />
       <MoreStack.Screen name="BookingReports" component={BookingReportsScreen} />
       <MoreStack.Screen name="Receipts" component={ReceiptsScreen} />
       <MoreStack.Screen name="MasterList" component={MasterListScreen} />
@@ -90,6 +93,18 @@ function MainTabs() {
   useSessionTimer();
   // Finance mode (More → Finance mode) swaps Bookings / Stuffing for Invoices / Delivery notes.
   const financeMode = useAppSelector(selectFinanceMode);
+  // The Pickup role gets Pickup / Pre-book / Profile instead of Bookings / Stuffing / More.
+  const pickupMode = useAppSelector(selectPickupMode);
+  if (pickupMode) {
+    return (
+      <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
+        <Tabs.Screen name="Home" component={DashboardScreen} />
+        <Tabs.Screen name="Pickup" component={PickupTabScreen} />
+        <Tabs.Screen name="PreBookings" component={PreBookingsTabScreen} />
+        <Tabs.Screen name="Profile" component={ProfileScreen} />
+      </Tabs.Navigator>
+    );
+  }
   return (
     <Tabs.Navigator tabBar={(props) => <TabBar {...props} />} screenOptions={{ headerShown: false }}>
       <Tabs.Screen name="Home" component={DashboardScreen} />
@@ -151,6 +166,7 @@ export function RootNavigator() {
             />
             <Stack.Screen name="MasterForm" component={MasterFormScreen} options={{ presentation: "modal" }} />
             <Stack.Screen name="ReceiptEntry" component={ReceiptEntryScreen} options={{ presentation: "modal" }} />
+            <Stack.Screen name="ExpenseList" component={ExpenseListScreen} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} options={{ animationTypeForReplace: "pop" }} />

@@ -50,8 +50,9 @@ async function invoiceSheet(invoice: Invoice, booking: Booking | undefined, rece
   const qty = Number(booking?.actualBundle || booking?.bundleCount || 0);
   const pickup = Number(booking?.pickupCharge || 0);
   const brand = Number(booking?.brandHandlingCharge || 0);
-  // Whatever the total holds beyond the bundles, pickup / brand handling and discount is the delivery partner's charge.
-  const delivery = Math.round((invoice.amount - invoice.subtotal + invoice.receivableDiscount - pickup - brand) * 100) / 100;
+  const bundle = Number(booking?.bundleHandlingCharge || 0);
+  // Whatever the total holds beyond the bundles, pickup / brand / bundle handling and discount is the delivery partner's charge.
+  const delivery = Math.round((invoice.amount - invoice.subtotal + invoice.receivableDiscount - pickup - brand - bundle) * 100) / 100;
   // The booking's charges may have been edited since — only itemise them if they still add up.
   const split = delivery >= 0;
   const rows: ConsigneeSheet["rows"] = [
@@ -67,6 +68,7 @@ async function invoiceSheet(invoice: Invoice, booking: Booking | undefined, rece
       ? [
           ...(pickup ? [{ particular: "Pickup charge (without bill)", amount: pickup }] : []),
           ...(brand ? [{ particular: "Brand handling charge", amount: brand }] : []),
+          ...(bundle ? [{ particular: "Bundle handling charge", amount: bundle }] : []),
           ...(delivery > 0 ? [{ particular: "Delivery partner charges", amount: delivery }] : []),
         ]
       : invoice.additionalCharges

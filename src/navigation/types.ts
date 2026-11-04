@@ -9,7 +9,9 @@ export type BookingFilter = "all" | BookingListTab;
 
 export type MoreStackParamList = {
   MoreHome: undefined;
-  Finance: { tab?: "invoices" | "receipts" | "expenses" } | undefined;
+  Finance: { tab?: "invoices" | "receipts" } | undefined;
+  /** Daily expenses (More → Masters). */
+  Expenses: undefined;
   /** Bookings in a month / date range, grouped container-, customer- or country-wise. */
   BookingReports: undefined;
   /** Web console's Receipt entry list. */
@@ -27,6 +29,10 @@ export type MainTabParamList = {
   Invoices: undefined;
   DeliveryNotes: undefined;
   Stuffing: undefined;
+  /** Pickup role: the Pickup assign list, Pre-booking list and Profile tabs. */
+  Pickup: undefined;
+  PreBookings: undefined;
+  Profile: undefined;
   More: NavigatorScreenParams<MoreStackParamList> | undefined;
 };
 
@@ -43,6 +49,8 @@ export type RootStackParamList = {
   /** Finance mode's + action: record a payment received against an invoice. */
   ReceiptEntry: undefined;
   MasterForm: { masterKey: MasterKey; id?: string };
+  /** Pickup role's + action: the Expenses screen (list and "+ Add"). */
+  ExpenseList: undefined;
 };
 
 export type RootScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<RootStackParamList, T>;

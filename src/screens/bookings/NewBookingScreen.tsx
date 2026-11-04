@@ -28,7 +28,6 @@ const BUNDLE_TYPES: BundleType[] = ["Bundle", "Box", "CBM", "KG"];
 const PACKAGE_STATUSES: readonly RepackingStatus[] = ["Ready to Ship", "Repacking Required"];
 /** The web console shows these values as "Package Ready" / "Repacking". */
 const PACKAGE_STATUS_LABELS: Record<RepackingStatus, string> = { "Ready to Ship": "Package ready", "Repacking Required": "Repacking" };
-const ANY_PARTNER = "__latest__";
 
 /**
  * Like the web form, a booking links the newest active Pickup Assign — the chosen partner's when it has one,
@@ -53,7 +52,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
   const [saving, setSaving] = useState(false);
 
   const [date, setDate] = useState(todayISO());
-  const [partner, setPartner] = useState<string>(ANY_PARTNER);
+  const [partner, setPartner] = useState("");
   const [senderId, setSenderId] = useState("");
   const [receiverId, setReceiverId] = useState("");
   const [billOption, setBillOption] = useState<BillOption>("With Bill");
@@ -79,13 +78,10 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
   const senders = useMemo(() => customers.filter((c) => c.customerType === "Sender" && c.status !== false).map(toOption), [customers]);
   const receivers = useMemo(() => customers.filter((c) => c.customerType === "Receiver" && c.status !== false).map(toOption), [customers]);
   const partnerOptions = useMemo<SelectOption[]>(
-    () => [
-      { value: ANY_PARTNER, label: "Our pickup boy" },
-      ...partners.filter((p) => p.status !== false).map((p) => ({ value: str(p.name), label: str(p.name) })),
-    ],
+    () => partners.filter((p) => p.status !== false).map((p) => ({ value: str(p.name), label: str(p.name) })),
     [partners]
   );
-  const assign = latestPickupAssign(assigns, partner === ANY_PARTNER ? null : partner);
+  const assign = latestPickupAssign(assigns, partner || null);
 
   const showBrand = productType === "Branded";
   const showPickup = billOption === "Without Bill";
@@ -137,6 +133,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
       bundleHandlingCharge: Number(bundleCharge) || 0,
     };
     setSaving(true);
+    console.log(input)
     const result = await dispatch(createBooking(input));
     setSaving(false);
     if (createBooking.fulfilled.match(result)) {

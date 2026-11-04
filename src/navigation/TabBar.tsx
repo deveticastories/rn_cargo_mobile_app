@@ -7,13 +7,14 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Animated, BackHandler, Easing, Keyboard, Pressable, StyleSheet, View } from "react-native";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import type { NavigationProp } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { ArrowLeftRight, ClipboardList, FileText, House, LayoutGrid, Package, Plus, ReceiptText, Ship, Truck } from "lucide-react-native";
+import { ArrowLeftRight, CalendarClock, ClipboardList, FileText, House, LayoutGrid, Package, Plus, ReceiptText, Ship, Truck, User, Wallet } from "lucide-react-native";
 import { Txt } from "@/components/Txt";
 import type { RootStackParamList } from "@/navigation/types";
 import { useAppSelector } from "@/store/hooks";
-import { selectFinanceMode } from "@/store/slices/authSlice";
+import { selectFinanceMode, selectPickupMode } from "@/store/slices/authSlice";
 import { useTheme } from "@/theme/ThemeProvider";
 
 const ICONS = {
@@ -22,10 +23,13 @@ const ICONS = {
   Invoices: FileText,
   DeliveryNotes: Truck,
   Stuffing: ArrowLeftRight,
+  Pickup: ClipboardList,
+  PreBookings: CalendarClock,
+  Profile: User,
   More: LayoutGrid,
 } as const;
 /** Tab labels where the route name isn't short enough to show as-is. */
-const LABELS: Record<string, string> = { DeliveryNotes: "Delivery" };
+const LABELS: Record<string, string> = { DeliveryNotes: "Delivery", PreBookings: "Pre-book" };
 
 const BAR_PADDING_TOP = 10;
 const FAB_SIZE = 56;
@@ -35,24 +39,36 @@ const FAB_LIFT = 26;
 const ARC_RADIUS = 100;
 const ARC_FROM = 135;
 const ARC_TO = 45;
+/** Three or more actions spread wider so their tiles don't overlap. */
+const WIDE_ARC_RADIUS = 125;
+const WIDE_ARC_FROM = 150;
+const WIDE_ARC_TO = 30;
 /** Each action is a tile wide enough for its label on one line. */
 const ACTION_WIDTH = 96;
 const ACTION_HEIGHT = 60;
 
-type FabAction = { key: Extract<keyof RootStackParamList, "Containers" | "NewBooking" | "ReceiptEntry">; label: string; icon: typeof Ship };
+type FabAction = { key: string; label: string; icon: typeof Ship; open: (nav: NavigationProp<RootStackParamList>) => void };
 
 // Placed along the arc from left to right.
 const FAB_ACTIONS: FabAction[] = [
-  { key: "Containers", label: "Containers", icon: Ship },
-  { key: "NewBooking", label: "New booking", icon: ClipboardList },
+  { key: "preBooking", label: "Pre-booking", icon: CalendarClock, open: (nav) => nav.navigate("MasterForm", { masterKey: "preBookings" }) },
+  { key: "NewBooking", label: "New booking", icon: ClipboardList, open: (nav) => nav.navigate("NewBooking") },
 ];
 // Finance mode: the + button records a receipt instead.
-const FINANCE_ACTIONS: FabAction[] = [{ key: "ReceiptEntry", label: "Receipt entry", icon: ReceiptText }];
+// Pickup role: a pickup assign, a pre-booking or an expense — no new booking.
+const PICKUP_ACTIONS: FabAction[] = [
+  { key: "pickupAssign", label: "Pickup assign", icon: Truck, open: (nav) => nav.navigate("MasterForm", { masterKey: "pickupAssigns" }) },
+  ...FAB_ACTIONS.filter((a) => a.key !== "NewBooking"),
+  { key: "ExpenseList", label: "Expenses", icon: Wallet, open: (nav) => nav.navigate("ExpenseList") },
+];
+const FINANCE_ACTIONS: FabAction[] = [{ key: "ReceiptEntry", label: "Receipt entry", icon: ReceiptText, open: (nav) => nav.navigate("ReceiptEntry") }];
 
 export function TabBar({ state, navigation }: BottomTabBarProps) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const actions = useAppSelector(selectFinanceMode) ? FINANCE_ACTIONS : FAB_ACTIONS;
+  const financeMode = useAppSelector(selectFinanceMode);
+  const pickupMode = useAppSelector(selectPickupMode);
+  const actions = financeMode ? FINANCE_ACTIONS : pickupMode ? PICKUP_ACTIONS : FAB_ACTIONS;
   const anim = useRef(new Animated.Value(0)).current;
   const [open, setOpen] = useState(false);
   const [bar, setBar] = useState({ y: 0, width: 0 });
@@ -131,10 +147,11 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
           </Animated.View>
           {actions.map((a, i) => {
             // A single action sits straight above the + button; several fan out along the arc.
-            const deg = actions.length === 1 ? 90 : ARC_FROM - (i * (ARC_FROM - ARC_TO)) / (actions.length - 1);
+            const [radius, from, to] = actions.length > 2 ? [WIDE_ARC_RADIUS, WIDE_ARC_FROM, WIDE_ARC_TO] : [ARC_RADIUS, ARC_FROM, ARC_TO];
+            const deg = actions.length === 1 ? 90 : from - (i * (from - to)) / (actions.length - 1);
             const angle = (deg * Math.PI) / 180;
-            const dx = ARC_RADIUS * Math.cos(angle);
-            const dy = -ARC_RADIUS * Math.sin(angle);
+            const dx = radius * Math.cos(angle);
+            const dy = -radius * Math.sin(angle);
             // Each action springs out of the + button to its spot on the arc.
             const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [-dx, 0] });
             const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [-dy, 0] });
@@ -155,7 +172,10 @@ export function TabBar({ state, navigation }: BottomTabBarProps) {
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={a.label}
-                  onPress={() => closeMenu(() => navigation.getParent()?.navigate(a.key))}
+                  onPress={() => closeMenu(() => {
+                    const root = navigation.getParent<NavigationProp<RootStackParamList>>();
+                    if (root) a.open(root);
+                  })}
                   style={({ pressed }) => [
                     styles.action,
                     { backgroundColor: t.surface, borderColor: t.border, shadowColor: t.shadow, opacity: pressed ? 0.85 : 1 },

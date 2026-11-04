@@ -16,7 +16,7 @@ import {
   Wallet,
 } from "lucide-react-native";
 import { BookingRow } from "@/components/BookingViews";
-import { Avatar, Card, IconButton, IconTile, SectionTitle } from "@/components/primitives";
+import { Avatar, Badge, Card, IconButton, IconTile, SectionTitle } from "@/components/primitives";
 import { ReceiptRow } from "@/components/ReceiptRow";
 import { Notice, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
@@ -26,15 +26,17 @@ import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { TabScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { selectFinanceMode } from "@/store/slices/authSlice";
+import { selectFinanceMode, selectPickupMode } from "@/store/slices/authSlice";
 import { cutOffLabel, selectBookingStats, selectBookingsSorted, selectNextContainer, selectReceiptRows, selectReceivables } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
 import { fetchFinance } from "@/store/slices/financeSlice";
 import { fetchMaster } from "@/store/slices/mastersSlice";
+import { pickupFullyCollected } from "@/features/masters/config";
+import { num, refField, str } from "@/services/mappers";
 import type { Tone } from "@/theme/palette";
 import { useTheme } from "@/theme/ThemeProvider";
-import type { Container } from "@/types";
+import type { BackendDoc, Container } from "@/types";
 import { daysFromToday, greeting, isSameMonth, longToday, money, monthLabel, shortDate } from "@/utils/format";
 
 type IconType = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
@@ -47,6 +49,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
   const recent = useAppSelector(selectBookingsSorted).slice(0, 5);
   const bookingsState = useAppSelector((s) => s.bookings);
   const financeMode = useAppSelector(selectFinanceMode);
+  const pickupMode = useAppSelector(selectPickupMode);
   const containers = useAppSelector((s) => s.containers.items);
   const expenses = useAppSelector((s) => s.finance.expenses);
   const team = useAppSelector((s) => s.masters.team.items);
@@ -56,6 +59,9 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
   const financeStatus = useAppSelector((s) => s.finance.status);
   const todayError = useAppSelector((s) => s.finance.error ?? s.containers.error);
   const { receiverCity } = useCustomerLookup();
+  // Pickup role: the dashboard is about pickup assigns instead of bookings.
+  const pickups = useAppSelector((s) => s.masters.pickupAssigns.items);
+  const pickupStatus = useAppSelector((s) => s.masters.pickupAssigns.status);
 
   const load = useCallback(
     () =>
@@ -65,6 +71,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
         dispatch(fetchFinance()),
         dispatch(fetchMaster("team")),
         dispatch(fetchMaster("customers")),
+        dispatch(fetchMaster("pickupAssigns")),
       ]),
     [dispatch]
   );
@@ -78,6 +85,16 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
   const stuffedTotal = stats.counts.stuffed;
   const readyTotal = stats.counts.ready + stats.counts.readyToStuff;
   const pipelineTotal = Math.max(1, stats.total);
+
+  const activePickups = pickups.filter((p) => p.status !== false);
+  const fullyCollected = activePickups.filter(pickupFullyCollected).length;
+  const partiallyCollected = activePickups.filter((p) => p.pickupStatus === "Collected" && !pickupFullyCollected(p)).length;
+  const collectedBundles = activePickups.reduce((sum, p) => sum + (p.pickupStatus === "Collected" ? num(p.collectedBundle) : 0), 0);
+  // Newest first (Mongo ids start with their creation time).
+  const recentPickups = [...activePickups].sort((a, b) => (b._id > a._id ? 1 : -1)).slice(0, 5);
+  // Pickups not fully collected yet (pending or partial) light the bell.
+  const openPickups = activePickups.filter((p) => !pickupFullyCollected(p)).length;
+  const goPickups = () => navigation.navigate("Pickup");
 
   const goBookings = (filter?: "packingList" | "readyToStuff" | "stuffed") => navigation.navigate("Bookings", { filter: filter ?? "all" });
 
@@ -104,9 +121,9 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           {/* Finance mode has no Bookings tab to open. */}
           <IconButton
             icon={Bell}
-            dot={stats.counts.repacking > 0}
-            accessibilityLabel="Bookings needing repacking"
-            onPress={financeMode ? undefined : () => goBookings("packingList")}
+            dot={pickupMode ? openPickups > 0 : stats.counts.repacking > 0}
+            accessibilityLabel={pickupMode ? "Pickups still to collect" : "Bookings needing repacking"}
+            onPress={financeMode ? undefined : pickupMode ? goPickups : () => goBookings("packingList")}
           />
         </View>
 
@@ -120,7 +137,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           </View>
           <View style={styles.rowBetween}>
             <Txt size={13} color="rgba(255,255,255,0.75)">
-              Total bookings
+              {pickupMode ? "Total pickups" : "Total bookings"}
             </Txt>
             <Txt size={13} color="rgba(255,255,255,0.75)">
               {monthLabel()}
@@ -128,9 +145,9 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           </View>
           <View style={styles.heroValue}>
             <Txt size={44} weight="bold" color="#FFFFFF" style={{ lineHeight: 50 }}>
-              {stats.total}
+              {pickupMode ? activePickups.length : stats.total}
             </Txt>
-            {stats.growth !== null && (
+            {!pickupMode && stats.growth !== null && (
               <View style={styles.growth}>
                 {stats.growth >= 0 ? <TrendingUp size={12} color="#FFFFFF" /> : <TrendingDown size={12} color="#FFFFFF" />}
                 <Txt size={11.5} weight="semibold" color="#FFFFFF">
@@ -140,7 +157,13 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
             )}
           </View>
           {/* Booking status tiles (hidden in finance mode) */}
-          {!financeMode && (
+          {pickupMode && (
+            <View style={styles.heroTiles}>
+              <HeroTile value={fullyCollected} label="Fully collected" onPress={goPickups} />
+              <HeroTile value={partiallyCollected} label="Partially collected" onPress={goPickups} />
+            </View>
+          )}
+          {!financeMode && !pickupMode && (
             <View style={styles.heroTiles}>
               <HeroTile value={stats.counts.repacking} label="Repacking" onPress={() => goBookings("packingList")} />
               <HeroTile value={readyTotal} label="Package ready" onPress={() => goBookings("readyToStuff")} />
@@ -149,8 +172,8 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           )}
         </LinearGradient>
 
-        {/* Quick actions (booking work — hidden in finance mode) */}
-        {!financeMode && (
+        {/* Quick actions (booking work — hidden in finance and pickup mode) */}
+        {!financeMode && !pickupMode && (
           <View style={styles.quick}>
             <QuickAction icon={ClipboardList} label={"New\nbooking"} tone="info" onPress={() => navigation.navigate("NewBooking")} />
             <QuickAction
@@ -169,8 +192,8 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           </View>
         )}
 
-        {/* Pipeline (hidden in finance mode) */}
-        {!financeMode && (
+        {/* Pipeline (hidden in finance and pickup mode) */}
+        {!financeMode && !pickupMode && (
           <>
             <SectionTitle title="Shipment pipeline" action="Details" onAction={() => goBookings()} />
             <Card>
@@ -204,6 +227,12 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
         {/* Today */}
         <SectionTitle title="Today" />
         {financeMode && todayError && <Notice message={todayError} onRetry={load} />}
+        {pickupMode ? (
+          <View style={styles.grid}>
+            <TodayTile icon={Boxes} tone="success" value={String(collectedBundles)} label="Bundles collected" />
+            <TodayTile icon={Wallet} tone="warning" value={money(monthExpense)} label="Expense logged" />
+          </View>
+        ) : (
         <View style={styles.grid}>
           {financeMode ? (
             <NextContainerTile container={nextContainer} />
@@ -222,6 +251,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
             <TodayTile icon={Users} tone="purple" value={String(activeStaff)} label="Active staff" />
           )}
         </View>
+        )}
 
         {/* Recent receipts (finance mode only) */}
         {financeMode && (
@@ -239,8 +269,24 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           </>
         )}
 
-        {/* Recent (hidden in finance mode) */}
-        {!financeMode && (
+        {/* Recent pickups (pickup mode) */}
+        {pickupMode && (
+          <>
+            <SectionTitle title="Recent pickups" action="See all" onAction={goPickups} />
+            <Card padded={false}>
+              {recentPickups.length === 0 ? (
+                <Txt muted align="center" style={{ padding: 24 }}>
+                  {pickupStatus === "loading" ? "Loading pickups…" : "No pickups yet."}
+                </Txt>
+              ) : (
+                recentPickups.map((p, i) => <PickupRow key={p._id} pickup={p} last={i === recentPickups.length - 1} onPress={goPickups} />)
+              )}
+            </Card>
+          </>
+        )}
+
+        {/* Recent (hidden in finance and pickup mode) */}
+        {!financeMode && !pickupMode && (
           <>
             <SectionTitle title="Recent bookings" action="See all" onAction={() => goBookings()} />
             <Card padded={false}>
@@ -264,6 +310,38 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
         )}
       </ScrollView>
     </Screen>
+  );
+}
+
+function PickupRow({ pickup: p, last, onPress }: { pickup: BackendDoc; last?: boolean; onPress: () => void }) {
+  const t = useTheme();
+  const assigned = num(p.bundleCount);
+  const collected = p.pickupStatus === "Collected" ? num(p.collectedBundle) : 0;
+  const status = pickupFullyCollected(p)
+    ? { label: "Fully collected", tone: "success" as const }
+    : p.pickupStatus === "Collected"
+      ? { label: "Partially collected", tone: "info" as const }
+      : { label: "Pending", tone: "warning" as const };
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.pickupRow,
+        !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: t.border },
+        pressed && { backgroundColor: t.surfaceAlt },
+      ]}
+    >
+      <IconTile icon={Truck} tone={status.tone} size={40} />
+      <View style={{ flex: 1, marginHorizontal: 12 }}>
+        <Txt size={14.5} weight="bold" numberOfLines={1}>
+          LR {str(p.lrNo)}
+        </Txt>
+        <Txt size={12} muted numberOfLines={1} style={{ marginTop: 2 }}>
+          {[str(refField(p.transport, "name")), `${collected}/${assigned} bundles`].filter(Boolean).join(" · ")}
+        </Txt>
+      </View>
+      <Badge label={status.label} tone={status.tone} size="sm" />
+    </Pressable>
   );
 }
 
@@ -397,4 +475,5 @@ const styles = StyleSheet.create({
   legend: { flexDirection: "row", marginTop: 14 },
   grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 12 },
   todayTile: { width: "48.3%" },
+  pickupRow: { flexDirection: "row", alignItems: "center", paddingVertical: 12, paddingHorizontal: 14 },
 });

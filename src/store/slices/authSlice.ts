@@ -132,5 +132,13 @@ const authSlice = createSlice({
 export const isFinanceRole = (role?: unknown) => /^fin/i.test(roleName(role));
 export const selectFinanceMode = (s: { auth: AuthState }) => isFinanceRole(s.auth.user?.role);
 
+/** "Super Admin" (any case / spacing) — the only role that sees Reports and Finance under More. */
+export const isSuperAdminRole = (role?: unknown) => /^super[\s_-]*admin$/i.test(roleName(role).trim());
+export const selectSuperAdmin = (s: { auth: AuthState }) => isSuperAdminRole(s.auth.user?.role);
+
+/** "Pickup" role: Pickup assigns, Expenses and Profile take the place of Bookings, Stuffing and More. */
+export const isPickupRole = (role?: unknown) => /^pickup$/i.test(roleName(role).trim());
+export const selectPickupMode = (s: { auth: AuthState }) => isPickupRole(s.auth.user?.role);
+
 export const { sessionExpired, clearAuthError } = authSlice.actions;
 export default authSlice.reducer;

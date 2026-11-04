@@ -9,9 +9,10 @@ import { Badge, Card, IconButton, IconTile } from "@/components/primitives";
 import { EmptyView, LoadingView, Notice, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
 import { TextField } from "@/components/TextField";
-import { MASTERS, isActive, pickupFullyCollected } from "@/features/masters/config";
+import { MASTERS, isActive, pickupFullyCollected, type MasterKey } from "@/features/masters/config";
 import { useRefresh } from "@/hooks/useBootstrapData";
-import type { MoreScreenProps } from "@/navigation/types";
+import { useNavigation, type NavigationProp } from "@react-navigation/native";
+import type { MoreScreenProps, RootStackParamList } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { deleteMaster, fetchMaster, recordPickupCollected, toggleMasterStatus } from "@/store/slices/mastersSlice";
 import { ensureMaster } from "@/store/ensure";
@@ -22,9 +23,26 @@ import { num, refField, str } from "@/services/mappers";
 import { money } from "@/utils/format";
 
 export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterList">) {
+  return <MasterListView masterKey={route.params.masterKey} onBack={() => navigation.goBack()} />;
+}
+
+/** Pickup role's Pickup tab. */
+export function PickupTabScreen() {
+  // New pickups come from the tab bar's + menu.
+  return <MasterListView masterKey="pickupAssigns" noAdd />;
+}
+
+/** Pickup role's Pre-book tab. */
+export function PreBookingsTabScreen() {
+  return <MasterListView masterKey="preBookings" />;
+}
+
+/** The list itself; `onBack` adds the back button (absent when it's a tab). */
+function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; onBack?: () => void; noAdd?: boolean }) {
   const t = useTheme();
   const dispatch = useAppDispatch();
-  const def = MASTERS[route.params.masterKey];
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const def = MASTERS[masterKey];
   const entry = useAppSelector((s) => s.masters[def.key]);
   const mutatingId = useAppSelector((s) => s.masters.mutatingId);
   const [query, setQuery] = useState("");
@@ -97,11 +115,13 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
   return (
     <Screen>
       <View style={styles.header}>
-        <IconButton icon={ChevronLeft} onPress={() => navigation.goBack()} accessibilityLabel="Back" />
-        <Txt size={24} weight="bold" style={{ flex: 1, marginLeft: 12 }} numberOfLines={1}>
+        {onBack && <IconButton icon={ChevronLeft} onPress={onBack} accessibilityLabel="Back" />}
+        <Txt size={24} weight="bold" style={{ flex: 1, marginLeft: onBack ? 12 : 0 }} numberOfLines={1}>
           {def.title}
         </Txt>
-        <IconButton icon={Plus} filled onPress={() => navigation.navigate("MasterForm", { masterKey: def.key })} accessibilityLabel={`New ${def.singular}`} />
+        {!def.noListAdd && !noAdd && (
+          <IconButton icon={Plus} filled onPress={() => navigation.navigate("MasterForm", { masterKey: def.key })} accessibilityLabel={`New ${def.singular}`} />
+        )}
       </View>
 
       <View style={{ paddingHorizontal: 20, marginBottom: 12 }}>
@@ -127,7 +147,7 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 30, flexGrow: 1 }}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
           ListHeaderComponent={entry.error ? <Notice message={entry.error} onRetry={() => dispatch(fetchMaster(def.key))} /> : null}
-          ListEmptyComponent={<EmptyView title={`No ${def.title.toLowerCase()} yet`} message={`Tap + to add a ${def.singular}.`} />}
+          ListEmptyComponent={<EmptyView title={`No ${def.title.toLowerCase()} yet`} message={def.noListAdd || noAdd ? `Use the + button below to add a ${def.singular}.` : `Tap + to add a ${def.singular}.`} />}
           renderItem={({ item }) => {
             if (def.key === "pickupAssigns") {
               return (
