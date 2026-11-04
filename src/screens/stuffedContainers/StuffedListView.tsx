@@ -5,8 +5,9 @@
  * charges and bundles — with the container booking list PDF.
  */
 import React, { useMemo, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { ChevronDown, ChevronUp, Download, FileText, Ship } from "lucide-react-native";
+import { showError } from "@/components/AppAlert";
 import { Card, IconTile } from "@/components/primitives";
 import { EmptyView, LoadingView, Notice } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
@@ -121,7 +122,7 @@ export function StuffedListView({
     try {
       await task();
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(null);
     }

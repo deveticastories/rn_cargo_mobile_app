@@ -9,7 +9,7 @@
  *   │   ├─ Invoices        (web console's Invoicing: generate invoice)
  *   │   ├─ DeliveryNotes   (web console's Invoicing: generate delivery note)
  *   │   ├─ Stuffing
- *   │   └─ More → stack: MoreHome · Finance · MasterList · StuffedContainers · StuffedContainer
+ *   │   └─ More → stack: MoreHome · Finance · BookingReports · Receipts · MasterList · StuffedContainers · StuffedContainer
  *   ├─ BookingDetail
  *   ├─ Containers   (from the tab bar's + menu)
  *   ├─ Repacking · ReadyToShip   (packing lists, from Booking detail)
@@ -42,7 +42,9 @@ import { InvoicesScreen } from "@/screens/invoicing/InvoicesScreen";
 import { ReadyToShipScreen, RepackingScreen } from "@/screens/packing/BundleWorkspaceScreen";
 import { FinanceScreen } from "@/screens/finance/FinanceScreen";
 import { ReceiptEntryScreen } from "@/screens/finance/ReceiptEntryScreen";
+import { ReceiptsScreen } from "@/screens/finance/ReceiptsScreen";
 import { MoreScreen } from "@/screens/more/MoreScreen";
+import { BookingReportsScreen } from "@/screens/reports/BookingReportsScreen";
 import { MasterListScreen } from "@/screens/masters/MasterListScreen";
 import { MasterFormScreen } from "@/screens/masters/MasterFormScreen";
 import { StuffedContainerScreen } from "@/screens/stuffedContainers/StuffedContainerScreen";
@@ -60,6 +62,8 @@ function MoreNavigator() {
     <MoreStack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
       <MoreStack.Screen name="MoreHome" component={MoreScreen} />
       <MoreStack.Screen name="Finance" component={FinanceScreen} />
+      <MoreStack.Screen name="BookingReports" component={BookingReportsScreen} />
+      <MoreStack.Screen name="Receipts" component={ReceiptsScreen} />
       <MoreStack.Screen name="MasterList" component={MasterListScreen} />
       <MoreStack.Screen name="StuffedContainers" component={StuffedContainersScreen} />
       <MoreStack.Screen name="StuffedContainer" component={StuffedContainerScreen} />

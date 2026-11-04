@@ -6,10 +6,11 @@
  * charge on its first receipt.
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, X } from "lucide-react-native";
 import { errorMessage } from "@/api/client";
+import { showAlert } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { DatePickerField } from "@/components/DatePickerField";
 import { IconButton } from "@/components/primitives";
@@ -88,8 +89,8 @@ export function ReceiptEntryScreen({ navigation }: RootScreenProps<"ReceiptEntry
         deliveryPartnerAmount: partner,
       });
       await dispatch(fetchFinance());
-      Alert.alert("Receipt saved", `${money(got)} received against ${invoice.code}.`);
-      navigation.goBack();
+      // Closes after the alert, so the dialog isn't opened over a screen that's leaving.
+      showAlert("Receipt saved", `${money(got)} received against ${invoice.code}.`, { tone: "success", onConfirm: () => navigation.goBack() });
     } catch (e) {
       setError(errorMessage(e, "Couldn't save the receipt."));
     } finally {

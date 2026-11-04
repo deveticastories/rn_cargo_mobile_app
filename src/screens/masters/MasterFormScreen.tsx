@@ -1,8 +1,9 @@
 /** Generic create/edit form for any master/operations module, driven by `MASTERS` config. */
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, Trash2, Wallet, X } from "lucide-react-native";
+import { showAlert } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Chip, IconButton } from "@/components/primitives";
@@ -51,6 +52,20 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
     def.dependsOn?.forEach((k) => dispatch(ensureMaster(k)));
   }, [dispatch, def]);
 
+  // Ref defaults need their master's records, which may still be loading when the form opens.
+  useEffect(() => {
+    if (isEdit) return;
+    setValues((v) => {
+      let next = v;
+      for (const f of def.fields) {
+        if (!f.defaultRef || !f.ref || v[f.key]) continue;
+        const match = masters[f.ref.master].items.find((d) => d.status !== false && f.defaultRef!(d));
+        if (match) next = { ...next, [f.key]: match._id };
+      }
+      return next;
+    });
+  }, [isEdit, def, masters]);
+
   const set = (key: string, value: string) => setValues((v) => ({ ...v, [key]: value }));
   /** Picks an option, asking first when the field wants a confirmation. */
   const choose = (f: FieldDef, value: string) => {
@@ -75,18 +90,16 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
   };
 
   const remove = () =>
-    Alert.alert(`Delete ${def.singular}?`, "This can't be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          const res = await dispatch(deleteMaster({ key: def.key, id: route.params.id! }));
-          if (deleteMaster.fulfilled.match(res)) navigation.goBack();
-          else setError(res.payload ?? "Couldn't delete.");
-        },
+    showAlert(`Delete ${def.singular}?`, "This can't be undone.", {
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      destructive: true,
+      onConfirm: async () => {
+        const res = await dispatch(deleteMaster({ key: def.key, id: route.params.id! }));
+        if (deleteMaster.fulfilled.match(res)) navigation.goBack();
+        else setError(res.payload ?? "Couldn't delete.");
       },
-    ]);
+    });
 
   const renderField = (f: FieldDef) => {
     const label = f.required ? f.label : `${f.label} (optional)`;

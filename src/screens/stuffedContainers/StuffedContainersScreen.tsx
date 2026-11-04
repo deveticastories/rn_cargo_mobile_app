@@ -4,8 +4,9 @@
  * container dropping down its bookings (charges, bundles) with their PDFs.
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { ChevronLeft, Download, Search, X } from "lucide-react-native";
+import { showAlert, showError } from "@/components/AppAlert";
 import { IconButton } from "@/components/primitives";
 import { NavHeader, Screen } from "@/components/Screen";
 import { useRefresh } from "@/hooks/useBootstrapData";
@@ -28,12 +29,12 @@ export function StuffedContainersScreen({ navigation }: MoreScreenProps<"Stuffed
 
   /** CONTAINER LIST PDF of the containers shown (respects the search). */
   const downloadList = async () => {
-    if (rows.length === 0) return Alert.alert("Nothing to download", "No stuffed containers to list.");
+    if (rows.length === 0) return showAlert("Nothing to download", "No stuffed containers to list.");
     setDownloading(true);
     try {
       await downloadContainerListPdf(rows, query);
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(false);
     }

@@ -1,14 +1,15 @@
 /** Generic list for any master/operations module (Team, Customers, Stores, Pickup assign, …). */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
+import { FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 import { CheckCircle2, ChevronLeft, PackageCheck, Plus, Power, PowerOff, Search } from "lucide-react-native";
+import { showAlert, showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconButton, IconTile } from "@/components/primitives";
 import { EmptyView, LoadingView, Notice, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
 import { TextField } from "@/components/TextField";
-import { MASTERS, pickupFullyCollected } from "@/features/masters/config";
+import { MASTERS, isActive, pickupFullyCollected } from "@/features/masters/config";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import type { MoreScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
@@ -51,14 +52,14 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
     return sorted.filter((d) => `${def.primary(d)} ${def.secondary(d)}`.toLowerCase().includes(q));
   }, [entry.items, query, def]);
 
-  const activating = toggling?.status === false;
+  const activating = toggling !== null && !isActive(def, toggling);
   const confirmToggle = async () => {
     if (!toggling) return;
     setToggleBusy(true);
     const res = await dispatch(toggleMasterStatus({ key: def.key, id: toggling._id, next: activating }));
     setToggleBusy(false);
     setToggling(null);
-    if (toggleMasterStatus.rejected.match(res)) Alert.alert("Couldn't update", res.payload ?? "Please try again.");
+    if (toggleMasterStatus.rejected.match(res)) showError("Couldn't update", res.payload ?? "Please try again.");
   };
 
   const openCollect = (doc: BackendDoc) => {
@@ -81,18 +82,16 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
   };
 
   const onDelete = (doc: BackendDoc) => {
-    if (def.canDelete && !def.canDelete(doc)) return Alert.alert(`Can't delete this ${def.singular}`, "Collected pickups can't be deleted.");
-    Alert.alert(`Delete ${def.singular}?`, `${def.primary(doc)} will be removed permanently.`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          const res = await dispatch(deleteMaster({ key: def.key, id: doc._id }));
-          if (deleteMaster.rejected.match(res)) Alert.alert("Couldn't delete", res.payload ?? "Please try again.");
-        },
+    if (def.canDelete && !def.canDelete(doc)) return showAlert(`Can't delete this ${def.singular}`, "Collected pickups can't be deleted.");
+    showAlert(`Delete ${def.singular}?`, `${def.primary(doc)} will be removed permanently.`, {
+      confirmLabel: "Delete",
+      cancelLabel: "Cancel",
+      destructive: true,
+      onConfirm: async () => {
+        const res = await dispatch(deleteMaster({ key: def.key, id: doc._id }));
+        if (deleteMaster.rejected.match(res)) showError("Couldn't delete", res.payload ?? "Please try again.");
       },
-    ]);
+    });
   };
 
   return (
@@ -162,7 +161,7 @@ export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterL
                   {extra && <Badge label={extra.label} tone={extra.tone} size="sm" />}
                   {def.hasStatus && (
                     <Pressable onPress={() => setToggling(item)} hitSlop={6} accessibilityLabel="Toggle status">
-                      <Badge label={item.status === false ? "Inactive" : "Active"} tone={item.status === false ? "neutral" : "success"} size="sm" />
+                      <Badge label={isActive(def, item) ? "Active" : "Inactive"} tone={isActive(def, item) ? "success" : "neutral"} size="sm" />
                     </Pressable>
                   )}
                 </View>

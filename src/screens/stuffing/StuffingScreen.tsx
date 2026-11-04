@@ -6,15 +6,16 @@
  *   Stuffed list: every stuffing (container, bookings, date), downloadable as a PDF.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from "react-native";
 import { ArrowLeftRight, Check, Download, FileText, Package, Search, Undo2, X } from "lucide-react-native";
+import { showAlert, showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { Card, Chip } from "@/components/primitives";
 import { EmptyView, LargeHeader, LoadingView, Notice, Screen } from "@/components/Screen";
 import { SelectField } from "@/components/SelectSheet";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
-import { packageService } from "@/services/packageService";
+import { packageService, type PackingLine } from "@/services/packageService";
 import { str } from "@/services/mappers";
 import { ensureMaster } from "@/store/ensure";
 import { useTabScrollReset } from "@/hooks/useTabScrollReset";
@@ -48,10 +49,11 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
   const bookingsStatus = useAppSelector((s) => s.bookings.status);
   const mutatingId = useAppSelector((s) => s.bookings.mutatingId);
 
-  // Product, fabric and pricing names for the Stuffed list's booking details.
+  // Product, fabric, unit and pricing names for the Stuffed list's booking details and the packing list PDF.
   useEffect(() => {
     dispatch(ensureMaster("products"));
     dispatch(ensureMaster("fabrics"));
+    dispatch(ensureMaster("units"));
     dispatch(ensureMaster("pricing"));
   }, [dispatch]);
 
@@ -106,7 +108,7 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
     setActionError(null);
     const result = await dispatch(loadIntoContainer({ containerId: container.id, bookingIds: picked }));
     if (loadIntoContainer.rejected.match(result)) return setActionError(result.payload ?? "Couldn't submit the stuffing.");
-    Alert.alert("Stuffing completed", `${picked.length} booking${picked.length === 1 ? "" : "s"} stuffed into ${container.code}.`);
+    showAlert("Stuffing completed", `${picked.length} booking${picked.length === 1 ? "" : "s"} stuffed into ${container.code}.`, { tone: "success" });
     setSelected((s) => ({ ...s, stuffing: [] }));
     setContainerId("");
   };
@@ -115,6 +117,8 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
   const readyScope = ready.filter((b) => picked.includes(b.id));
   const packages = useAppSelector((s) => s.containers.packages);
   const products = useAppSelector((s) => s.masters.products.items);
+  const fabrics = useAppSelector((s) => s.masters.fabrics.items);
+  const units = useAppSelector((s) => s.masters.units.items);
   /** Bundle mark of each saved bundle: every bundle across all packing lists numbered in id order, like the web. */
   const markOf = useMemo(() => {
     const ids = packages.flatMap((p) => p.bundles.map((x) => x.id)).filter(Boolean).sort();
@@ -128,7 +132,7 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
     setDownloading("containerPacking");
     try {
       const lists = await Promise.all(list.map((b) => packageService.getByBooking(b.id).catch(() => null)));
-      const productName = (id?: string) => (id ? str(products.find((p) => p._id === id)?.name) : "") || "-";
+      const nameOf = (items: { _id: string; name?: unknown }[], id?: string) => (id ? str(items.find((x) => x._id === id)?.name) : "") || "-";
       const bundles = lists
         .flatMap((l) => l?.bundles ?? [])
         .map((bundle) => ({ bundle, mark: markOf.get(bundle.id) ?? 0 }))
@@ -139,15 +143,17 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
       const body = bundles.flatMap(({ bundle, mark }, n) => {
         net += bundle.netWeight || 0;
         gross += bundle.grossWeight || 0;
-        const lines = bundle.lines.length ? bundle.lines : [{ productId: "", quantity: 0 }];
+        const lines: PackingLine[] = bundle.lines.length ? bundle.lines : [{ productId: "", quantity: 0 }];
         // Mark and weights belong to the bundle, so they print on its first product line only.
         return lines.map((l, i) => {
           qty += Number(l.quantity) || 0;
           return [
             i === 0 ? String(n + 1) : "",
             i === 0 ? (mark ? String(mark) : "-") : "",
-            productName(l.productId),
+            nameOf(products, l.productId),
             l.quantity ? String(l.quantity) : "-",
+            nameOf(units, l.unitId),
+            nameOf(fabrics, l.fabricId),
             i === 0 ? `${bundle.netWeight || 0} kg` : "",
             i === 0 ? `${bundle.grossWeight || 0} kg` : "",
           ];
@@ -160,12 +166,12 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
           ["No. of Bundles", String(bundles.length)],
           ["Generated On", fullDate(new Date().toISOString())],
         ],
-        head: ["Sl No", "Bundle Mark", "Product Name", "Quantity", "N.Wt", "Gr.Wt"],
+        head: ["Sl No", "Bundle Mark", "Product Name", "Quantity", "Unit", "Fabric", "N.Wt", "Gr.Wt"],
         body,
-        foot: ["", "", "Total", String(qty), `${Math.round(net * 100) / 100} kg`, `${Math.round(gross * 100) / 100} kg`],
+        foot: ["", "", "Total", String(qty), "", "", `${Math.round(net * 100) / 100} kg`, `${Math.round(gross * 100) / 100} kg`],
       });
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(null);
     }
@@ -198,7 +204,7 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
         foot: ["", "", "", "Total", String(total), "", ""],
       });
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(null);
     }

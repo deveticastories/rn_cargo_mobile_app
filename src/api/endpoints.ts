@@ -21,6 +21,7 @@ export const API_ENDPOINTS = {
   PRICING: { BASE: "/pricing", BY_ID: (id: string) => `/pricing/${id}` },
   FABRICS: crud("/fabrics"),
   PRODUCTS: crud("/products"),
+  UNITS: crud("/units"),
   PICKUP_ASSIGNS: {
     ...crud("/pickup-assigns"),
     PAYMENT_STATUS: (id: string) => `/pickup-assigns/${id}/payment-status`,

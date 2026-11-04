@@ -6,7 +6,7 @@
 import { createSlice } from "@reduxjs/toolkit";
 import { api, errorMessage } from "@/api/client";
 import { API_ENDPOINTS } from "@/api/endpoints";
-import { MASTERS, docToFormValues, formValuesToPayload, type MasterKey } from "@/features/masters/config";
+import { MASTERS, docToFormValues, formValuesToPayload, statusPayload, type MasterKey } from "@/features/masters/config";
 import { masterService } from "@/services/masterService";
 import { nextSequentialCode } from "@/services/mappers";
 import type { BackendDoc, LoadStatus } from "@/types";
@@ -47,7 +47,7 @@ export const saveMaster = createAppAsyncThunk(
       if (args.id) {
         await masterService.update(def, args.id, payload);
       } else {
-        if (def.hasStatus) payload.status = true;
+        if (def.hasStatus) Object.assign(payload, statusPayload(def, true));
         if (def.autoCode) {
           // Generate from the freshest list so two devices don't pick the same code.
           const latest = await masterService.list(def).catch(() => getState().masters[args.key].items);
@@ -67,7 +67,7 @@ export const toggleMasterStatus = createAppAsyncThunk(
   async (args: { key: MasterKey; id: string; next: boolean }, { rejectWithValue }) => {
     const def = MASTERS[args.key];
     try {
-      await masterService.update(def, args.id, { status: args.next });
+      await masterService.update(def, args.id, statusPayload(def, args.next));
       return { key: args.key, id: args.id, next: args.next };
     } catch (err) {
       return rejectWithValue(errorMessage(err, "Couldn't update the status."));
@@ -138,7 +138,7 @@ const mastersSlice = createSlice({
       .addCase(toggleMasterStatus.fulfilled, (state, { payload }) => {
         state.mutatingId = null;
         const doc = state[payload.key].items.find((d) => d._id === payload.id);
-        if (doc) doc.status = payload.next;
+        if (doc) Object.assign(doc, statusPayload(MASTERS[payload.key], payload.next));
       })
       .addCase(toggleMasterStatus.rejected, (state) => {
         state.mutatingId = null;

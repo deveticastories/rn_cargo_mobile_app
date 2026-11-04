@@ -8,7 +8,7 @@ import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import type { RootScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { containerPhase, selectBookingsPerContainer, voyageProgress, type ContainerPhase } from "@/store/selectors";
+import { containerPhase, cutOffLabel, selectBookingsPerContainer, voyageProgress, type ContainerPhase } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
 import { fonts, radius } from "@/theme/fonts";
@@ -16,15 +16,13 @@ import { useTheme } from "@/theme/ThemeProvider";
 import type { Container } from "@/types";
 import { clamp, daysFromToday, shortDate } from "@/utils/format";
 
-type Tab = "atSea" | "loading" | "stuffed";
+type Tab = "loading" | "stuffed";
 
-const TAB_LABEL: Record<Tab, string> = { atSea: "At sea", loading: "Loading", stuffed: "Stuffed" };
+const TAB_LABEL: Record<Tab, string> = { loading: "Loading", stuffed: "Stuffed" };
 
-/** Which tab a container belongs to: at sea, loading at Kochi, or stuffed (waiting to sail / arrived). */
+/** Which tab a container belongs to: loading at Kochi, or stuffed (waiting to sail, sailed or arrived). */
 function tabOf(phase: ContainerPhase): Tab {
-  if (phase === "atSea") return "atSea";
-  if (phase === "loading") return "loading";
-  return "stuffed";
+  return phase === "loading" ? "loading" : "stuffed";
 }
 
 /** Days before cut-off over which the loading bar fills up. */
@@ -36,7 +34,7 @@ export function ContainersScreen({ navigation }: RootScreenProps<"Containers">) 
   const { items, status, error } = useAppSelector((s) => s.containers);
   const perContainer = useAppSelector(selectBookingsPerContainer);
   const readyToStuff = useAppSelector((s) => s.bookings.items.filter((b) => b.stuffStatus === "Ready to Stuff").length);
-  const [tab, setTab] = useState<Tab>("atSea");
+  const [tab, setTab] = useState<Tab>("loading");
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -44,15 +42,14 @@ export function ContainersScreen({ navigation }: RootScreenProps<"Containers">) 
   const { refreshing, onRefresh } = useRefresh(load);
 
   const grouped = useMemo(() => {
-    const groups: Record<Tab, Container[]> = { atSea: [], loading: [], stuffed: [] };
+    const groups: Record<Tab, Container[]> = { loading: [], stuffed: [] };
     for (const c of items) {
       if (c.status === "Inactive") continue;
       groups[tabOf(containerPhase(c))].push(c);
     }
-    // Most urgent first: soonest arrival, soonest cut-off, soonest departure.
+    // Most urgent first: soonest cut-off, soonest departure.
     const byDate = (key: keyof Container) => (a: Container, b: Container) =>
       String(a[key] ?? "9999").localeCompare(String(b[key] ?? "9999"));
-    groups.atSea.sort(byDate("etaUae"));
     groups.loading.sort(byDate("cutOffDate"));
     groups.stuffed.sort(byDate("etdCok"));
     return groups;
@@ -168,7 +165,7 @@ function VoyageBlock({ c, phase }: { c: Container; phase: ContainerPhase }) {
       : phase === "atSea"
         ? toEta !== null
           ? `${toEta} day${toEta === 1 ? "" : "s"} to arrival`
-          : "At sea"
+          : "In container"
         : toEtd !== null
           ? toEtd === 0
             ? "Sails today"
@@ -216,8 +213,7 @@ function LoadingBlock({ c }: { c: Container }) {
   const toCutoff = daysFromToday(c.cutOffDate);
   const pct = toCutoff === null ? 0 : clamp(1 - toCutoff / LOADING_WINDOW_DAYS);
   const urgent = toCutoff !== null && toCutoff <= 3;
-  const label =
-    toCutoff === null ? "No cut-off set" : toCutoff < 0 ? "Cut-off passed" : toCutoff === 0 ? "Cut-off today" : `${toCutoff} day${toCutoff === 1 ? "" : "s"} to cut-off`;
+  const label = cutOffLabel(toCutoff);
 
   return (
     <>

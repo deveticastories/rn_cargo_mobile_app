@@ -11,10 +11,11 @@
  *   booking's package list is marked Added (and it shows up in Ready to stuff).
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, CheckCircle2, ChevronLeft, Download, Plus, Save, X } from "lucide-react-native";
 import { errorMessage } from "@/api/client";
+import { showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, Chip, IconButton, SectionTitle } from "@/components/primitives";
@@ -32,6 +33,7 @@ import { selectPackingByBooking } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
 import { ensureMaster } from "@/store/ensure";
+import { MASTERS, isActive } from "@/features/masters/config";
 import { radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Booking } from "@/types";
@@ -45,6 +47,7 @@ interface Line {
   product: string;
   qty: string;
   fabric: string;
+  unit: string;
   description: string;
 }
 
@@ -56,8 +59,8 @@ interface DraftBundle {
   lines: Line[];
 }
 
-const emptyLine = (): Line => ({ product: "", qty: "", fabric: "", description: "" });
-const hasData = (l: Line) => !!(l.product || l.qty || l.fabric || l.description);
+const emptyLine = (): Line => ({ product: "", qty: "", fabric: "", unit: "", description: "" });
+const hasData = (l: Line) => !!(l.product || l.qty || l.fabric || l.unit || l.description);
 const digits = (v: string) => v.replace(/\D/g, "");
 /** Weights in kg: digits with at most one decimal point and two decimals. */
 const decimal = (v: string) => v.replace(/[^\d.]/g, "").replace(/^(\d*\.?\d{0,2}).*$/, "$1");
@@ -114,7 +117,7 @@ function repackedByError(v: string): string | null {
 const needed = (b: Booking) => Math.max(1, b.actualBundle || b.bundleCount || 1);
 
 const toPackingLines = (lines: Line[]): PackingLine[] =>
-  lines.filter(hasData).map((l) => ({ productId: l.product, quantity: Number(l.qty) || 1, fabricId: l.fabric || undefined, description: l.description || undefined }));
+  lines.filter(hasData).map((l) => ({ productId: l.product, quantity: Number(l.qty) || 1, fabricId: l.fabric || undefined, unitId: l.unit || undefined, description: l.description || undefined }));
 
 export function RepackingScreen(props: RootScreenProps<"Repacking">) {
   return (
@@ -158,6 +161,7 @@ function BundleWorkspace({
   const bookings = useAppSelector((s) => s.bookings.items);
   const products = useAppSelector((s) => s.masters.products.items);
   const fabrics = useAppSelector((s) => s.masters.fabrics.items);
+  const units = useAppSelector((s) => s.masters.units.items);
   const packing = useAppSelector(selectPackingByBooking);
   const packages = useAppSelector((s) => s.containers.packages);
   const lookup = useCustomerLookup();
@@ -188,13 +192,17 @@ function BundleWorkspace({
   useEffect(() => {
     dispatch(ensureMaster("products"));
     dispatch(ensureMaster("fabrics"));
+    dispatch(ensureMaster("units"));
   }, [dispatch]);
 
   const booking = bookings.find((b) => b.id === bookingId);
   const productOptions = useMemo<SelectOption[]>(() => products.filter((p) => p.status !== false).map((p) => ({ value: p._id, label: str(p.name) })), [products]);
   const fabricOptions = useMemo<SelectOption[]>(() => fabrics.filter((f) => f.status !== false).map((f) => ({ value: f._id, label: str(f.name) })), [fabrics]);
+  const unitOptions = useMemo<SelectOption[]>(() => units.filter((u) => isActive(MASTERS.units, u)).map((u) => ({ value: u._id, label: str(u.name) })), [units]);
   const productName = (id?: string) => (id ? str(products.find((p) => p._id === id)?.name) || "—" : "");
   const fabricName = (id?: string) => (id ? str(fabrics.find((f) => f._id === id)?.name) : "");
+  const unitName = (id?: string) => (id ? str(units.find((u) => u._id === id)?.name) : "");
+  const withUnit = (qty: string, unit?: string) => [qty, unitName(unit)].filter(Boolean).join(" ");
 
   // Same booking lists as the web pages.
   const eligible = useMemo(
@@ -214,7 +222,7 @@ function BundleWorkspace({
   // Popup after a save: each saved bundle with its mark ID and the items added.
   const [savedPopup, setSavedPopup] = useState<{ title: string; message: string; bundles: { bundleNo: number; mark?: number; lines: PopupLine[] }[] } | null>(null);
   const popupLines = (lines: DraftBundle["lines"]): PopupLine[] =>
-    lines.filter(hasData).map((l) => ({ product: [productName(l.product), fabricName(l.fabric)].filter(Boolean).join(" · "), qty: l.qty || "1" }));
+    lines.filter(hasData).map((l) => ({ product: [productName(l.product), fabricName(l.fabric)].filter(Boolean).join(" · "), qty: withUnit(l.qty || "1", l.unit) }));
   const savedNos = useMemo(() => new Set(saved?.bundles.map((b) => b.bundleNo) ?? []), [saved]);
   if (booking && !firstCounts.current.has(booking.id)) firstCounts.current.set(booking.id, booking.bundleCount || 0);
   const actualBundles = booking ? firstCounts.current.get(booking.id) ?? booking.bundleCount : 0;
@@ -373,10 +381,10 @@ function BundleWorkspace({
   // What "Added bundles" / "Added items" lists, and the PDF prints.
   const added: { bundleNo: number; lines: { product: string; fabric: string; qty: string; description: string }[] }[] =
     mode === "repack"
-      ? staged.map((b) => ({ bundleNo: b.bundleNo, lines: b.lines.filter(hasData).map((l) => ({ product: productName(l.product), fabric: fabricName(l.fabric), qty: l.qty, description: l.description })) }))
+      ? staged.map((b) => ({ bundleNo: b.bundleNo, lines: b.lines.filter(hasData).map((l) => ({ product: productName(l.product), fabric: fabricName(l.fabric), qty: withUnit(l.qty, l.unit), description: l.description })) }))
       : (saved?.bundles ?? []).map((b) => ({
           bundleNo: b.bundleNo,
-          lines: b.lines.map((l) => ({ product: productName(l.productId), fabric: fabricName(l.fabricId), qty: String(l.quantity || ""), description: l.description ?? "" })),
+          lines: b.lines.map((l) => ({ product: productName(l.productId), fabric: fabricName(l.fabricId), qty: withUnit(String(l.quantity || ""), l.unitId), description: l.description ?? "" })),
         }));
 
   const downloadPdf = async () => {
@@ -395,7 +403,7 @@ function BundleWorkspace({
         bundles: added.map((b) => ({ bundleNo: b.bundleNo, items: b.lines.map((l) => ({ product: [l.product, l.fabric].filter(Boolean).join(" - "), qty: l.qty })) })),
       });
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(false);
     }
@@ -517,6 +525,7 @@ function BundleWorkspace({
                   mode={mode}
                   productOptions={productOptions}
                   fabricOptions={fabricOptions}
+                  unitOptions={unitOptions}
                   errors={draftErrors}
                   onWeight={(key, v) => setDraft((d) => (d ? { ...d, [key]: decimal(v) } : d))}
                   onLine={updateLine}
@@ -647,6 +656,7 @@ function DraftEditor({
   mode,
   productOptions,
   fabricOptions,
+  unitOptions,
   onWeight,
   onLine,
   onAddLine,
@@ -662,6 +672,7 @@ function DraftEditor({
   mode: Mode;
   productOptions: SelectOption[];
   fabricOptions: SelectOption[];
+  unitOptions: SelectOption[];
   onWeight: (key: "netWeight" | "grossWeight", value: string) => void;
   onLine: (i: number, patch: Partial<Line>) => void;
   onAddLine: () => void;
@@ -702,9 +713,10 @@ function DraftEditor({
               <TextField label="Qty" value={l.qty} onChangeText={(v) => onLine(i, { qty: digits(v).slice(0, 6) })} keyboardType="number-pad" placeholder="1" error={errors?.lines[i]?.qty} />
             </View>
             <View style={{ flex: 1 }}>
-              <SelectField label="Fabric" placeholder="Choose fabric" value={l.fabric} options={fabricOptions} onChange={(v) => onLine(i, { fabric: v })} emptyText="No fabrics yet — add one under More → Fabrics." />
+              <SelectField label="Unit" placeholder="Choose unit" value={l.unit} options={unitOptions} onChange={(v) => onLine(i, { unit: v })} emptyText="No units yet — add one under More → Units." />
             </View>
           </View>
+          <SelectField label="Fabric" placeholder="Choose fabric" value={l.fabric} options={fabricOptions} onChange={(v) => onLine(i, { fabric: v })} emptyText="No fabrics yet — add one under More → Fabrics." />
           <TextField
             label="Description"
             value={l.description}

@@ -5,8 +5,9 @@
  * booking for its charges ("BOOKING CHARGES" PDF) and bundles ("BUNDLE DETAILS" PDF).
  */
 import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { ChevronDown, ChevronLeft, ChevronRight, Download } from "lucide-react-native";
+import { showError } from "@/components/AppAlert";
 import { Badge, Card, DashedDivider, IconButton, Stat } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
@@ -62,7 +63,7 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
     try {
       await task();
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(null);
     }

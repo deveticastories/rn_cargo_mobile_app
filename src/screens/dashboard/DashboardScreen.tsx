@@ -17,6 +17,7 @@ import {
 } from "lucide-react-native";
 import { BookingRow } from "@/components/BookingViews";
 import { Avatar, Card, IconButton, IconTile, SectionTitle } from "@/components/primitives";
+import { ReceiptRow } from "@/components/ReceiptRow";
 import { Notice, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
@@ -26,14 +27,15 @@ import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { TabScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { selectFinanceMode } from "@/store/slices/authSlice";
-import { selectBookingStats, selectBookingsSorted } from "@/store/selectors";
+import { cutOffLabel, selectBookingStats, selectBookingsSorted, selectNextContainer, selectReceiptRows, selectReceivables } from "@/store/selectors";
 import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
 import { fetchFinance } from "@/store/slices/financeSlice";
 import { fetchMaster } from "@/store/slices/mastersSlice";
 import type { Tone } from "@/theme/palette";
 import { useTheme } from "@/theme/ThemeProvider";
-import { greeting, isSameMonth, longToday, money, monthLabel } from "@/utils/format";
+import type { Container } from "@/types";
+import { daysFromToday, greeting, isSameMonth, longToday, money, monthLabel, shortDate } from "@/utils/format";
 
 type IconType = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 
@@ -48,6 +50,11 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
   const containers = useAppSelector((s) => s.containers.items);
   const expenses = useAppSelector((s) => s.finance.expenses);
   const team = useAppSelector((s) => s.masters.team.items);
+  const nextContainer = useAppSelector(selectNextContainer);
+  const receivables = useAppSelector(selectReceivables);
+  const recentReceipts = useAppSelector(selectReceiptRows).slice(0, 5);
+  const financeStatus = useAppSelector((s) => s.finance.status);
+  const todayError = useAppSelector((s) => s.finance.error ?? s.containers.error);
   const { receiverCity } = useCustomerLookup();
 
   const load = useCallback(
@@ -94,11 +101,12 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
               {name.split(" ")[0]}
             </Txt>
           </View>
+          {/* Finance mode has no Bookings tab to open. */}
           <IconButton
             icon={Bell}
             dot={stats.counts.repacking > 0}
             accessibilityLabel="Bookings needing repacking"
-            onPress={() => goBookings("packingList")}
+            onPress={financeMode ? undefined : () => goBookings("packingList")}
           />
         </View>
 
@@ -107,7 +115,8 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
         {/* Hero metric */}
         <LinearGradient colors={t.heroGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
           <View style={styles.heroWatermark} pointerEvents="none">
-            <Ship size={150} color="rgba(255,255,255,0.07)" strokeWidth={1.2} />
+            {/* Sized to the card — it's shorter without the status tiles — so the whole ship stays visible. */}
+            <Ship size={financeMode ? 96 : 150} color="rgba(255,255,255,0.07)" strokeWidth={1.2} />
           </View>
           <View style={styles.rowBetween}>
             <Txt size={13} color="rgba(255,255,255,0.75)">
@@ -130,11 +139,14 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
               </View>
             )}
           </View>
-          <View style={styles.heroTiles}>
-            <HeroTile value={stats.counts.repacking} label="Repacking" onPress={() => goBookings("packingList")} />
-            <HeroTile value={readyTotal} label="Package ready" onPress={() => goBookings("readyToStuff")} />
-            <HeroTile value={stuffedTotal} label="Stuffed" onPress={() => goBookings("stuffed")} />
-          </View>
+          {/* Booking status tiles (hidden in finance mode) */}
+          {!financeMode && (
+            <View style={styles.heroTiles}>
+              <HeroTile value={stats.counts.repacking} label="Repacking" onPress={() => goBookings("packingList")} />
+              <HeroTile value={readyTotal} label="Package ready" onPress={() => goBookings("readyToStuff")} />
+              <HeroTile value={stuffedTotal} label="Stuffed" onPress={() => goBookings("stuffed")} />
+            </View>
+          )}
         </LinearGradient>
 
         {/* Quick actions (booking work — hidden in finance mode) */}
@@ -157,42 +169,75 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
           </View>
         )}
 
-        {/* Pipeline */}
-        <SectionTitle title="Shipment pipeline" action="Details" onAction={() => goBookings()} />
-        <Card>
-          <View style={styles.rowBetween}>
-            <Txt size={13} muted>
-              Where every booking stands
-            </Txt>
-            <Txt size={11.5} mono muted>
-              {stats.total} total
-            </Txt>
-          </View>
-          <View style={styles.pipeline}>
-            {[
-              { n: stats.counts.repacking, color: t.tones.warning.fg },
-              { n: readyTotal, color: t.primary },
-              { n: stuffedTotal, color: t.tones.purple.fg },
-            ].map((seg, i) =>
-              seg.n > 0 ? <View key={i} style={{ flex: seg.n / pipelineTotal, backgroundColor: seg.color, borderRadius: 4, height: 10 }} /> : null
-            )}
-            {stats.total === 0 && <View style={{ flex: 1, height: 10, borderRadius: 4, backgroundColor: t.surfaceAlt }} />}
-          </View>
-          <View style={styles.legend}>
-            <Legend color={t.tones.warning.fg} label="Repacking" value={stats.counts.repacking} />
-            <Legend color={t.primary} label="Ready" value={readyTotal} />
-            <Legend color={t.tones.purple.fg} label="Stuffed" value={stuffedTotal} />
-          </View>
-        </Card>
+        {/* Pipeline (hidden in finance mode) */}
+        {!financeMode && (
+          <>
+            <SectionTitle title="Shipment pipeline" action="Details" onAction={() => goBookings()} />
+            <Card>
+              <View style={styles.rowBetween}>
+                <Txt size={13} muted>
+                  Where every booking stands
+                </Txt>
+                <Txt size={11.5} mono muted>
+                  {stats.total} total
+                </Txt>
+              </View>
+              <View style={styles.pipeline}>
+                {[
+                  { n: stats.counts.repacking, color: t.tones.warning.fg },
+                  { n: readyTotal, color: t.primary },
+                  { n: stuffedTotal, color: t.tones.purple.fg },
+                ].map((seg, i) =>
+                  seg.n > 0 ? <View key={i} style={{ flex: seg.n / pipelineTotal, backgroundColor: seg.color, borderRadius: 4, height: 10 }} /> : null
+                )}
+                {stats.total === 0 && <View style={{ flex: 1, height: 10, borderRadius: 4, backgroundColor: t.surfaceAlt }} />}
+              </View>
+              <View style={styles.legend}>
+                <Legend color={t.tones.warning.fg} label="Repacking" value={stats.counts.repacking} />
+                <Legend color={t.primary} label="Ready" value={readyTotal} />
+                <Legend color={t.tones.purple.fg} label="Stuffed" value={stuffedTotal} />
+              </View>
+            </Card>
+          </>
+        )}
 
         {/* Today */}
         <SectionTitle title="Today" />
+        {financeMode && todayError && <Notice message={todayError} onRetry={load} />}
         <View style={styles.grid}>
-          <TodayTile icon={Boxes} tone="success" value={String(stats.readyBundles)} label="Bundles ready" />
+          {financeMode ? (
+            <NextContainerTile container={nextContainer} />
+          ) : (
+            <TodayTile icon={Boxes} tone="success" value={String(stats.readyBundles)} label="Bundles ready" />
+          )}
           <TodayTile icon={Ship} tone="purple" value={String(activeContainers)} label="Active containers" />
-          <TodayTile icon={Wallet} tone="warning" value={money(monthExpense)} label="Expense logged" />
-          <TodayTile icon={Users} tone="purple" value={String(activeStaff)} label="Active staff" />
+          {financeMode ? (
+            <TodayTile icon={Wallet} tone="warning" value={money(receivables.total)} label="Total receivable" />
+          ) : (
+            <TodayTile icon={Wallet} tone="warning" value={money(monthExpense)} label="Expense logged" />
+          )}
+          {financeMode ? (
+            <TodayTile icon={Wallet} tone="danger" value={money(receivables.outstanding)} label="Outstanding" />
+          ) : (
+            <TodayTile icon={Users} tone="purple" value={String(activeStaff)} label="Active staff" />
+          )}
         </View>
+
+        {/* Recent receipts (finance mode only) */}
+        {financeMode && (
+          <>
+            <SectionTitle title="Recent receipts" action="See all" onAction={() => navigation.navigate("More", { screen: "Receipts", initial: false })} />
+            <Card padded={false}>
+              {recentReceipts.length === 0 ? (
+                <Txt muted align="center" style={{ padding: 24 }}>
+                  {financeStatus === "loading" ? "Loading receipts…" : "No receipts yet."}
+                </Txt>
+              ) : (
+                recentReceipts.map((row, i) => <ReceiptRow key={row.receipt.id} row={row} last={i === recentReceipts.length - 1} />)
+              )}
+            </Card>
+          </>
+        )}
 
         {/* Recent (hidden in finance mode) */}
         {!financeMode && (
@@ -279,12 +324,53 @@ function TodayTile({ icon, tone, value, label }: { icon: IconType; tone: Tone; v
   );
 }
 
+function NextContainerTile({ container }: { container?: Container }) {
+  const t = useTheme();
+  const toCutoff = daysFromToday(container?.cutOffDate);
+  const urgent = toCutoff !== null && toCutoff <= 3;
+  return (
+    <Card style={styles.todayTile}>
+      <IconTile icon={Boxes} tone="success" size={34} />
+      <Txt size={12} muted style={{ marginTop: 14 }}>
+        Next to complete
+      </Txt>
+      {container ? (
+        <>
+          <Txt size={18} weight="bold" numberOfLines={1} adjustsFontSizeToFit>
+            {container.code}
+          </Txt>
+          {!!container.company && (
+            <Txt size={12} muted numberOfLines={1}>
+              {container.company}
+            </Txt>
+          )}
+          <Txt size={12} weight="semibold" color={urgent ? t.tones.danger.fg : t.text} style={{ marginTop: 6 }}>
+            {cutOffLabel(toCutoff)}
+          </Txt>
+          {!!container.cutOffDate && (
+            <Txt size={12} muted>
+              Cut-off {shortDate(container.cutOffDate)}
+            </Txt>
+          )}
+          <Txt size={12} muted>
+            ETD {shortDate(container.etdCok)}
+          </Txt>
+        </>
+      ) : (
+        <Txt size={14} weight="semibold" style={{ marginTop: 2 }}>
+          None waiting
+        </Txt>
+      )}
+    </Card>
+  );
+}
+
 const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingBottom: 40 },
   header: { flexDirection: "row", alignItems: "center", paddingTop: 8, paddingBottom: 18 },
   rowBetween: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   hero: { borderRadius: 24, padding: 18, overflow: "hidden" },
-  heroWatermark: { position: "absolute", right: -18, top: 6 },
+  heroWatermark: { position: "absolute", right: 14, top: 0, bottom: 0, justifyContent: "center" },
   heroValue: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 4 },
   growth: {
     flexDirection: "row",

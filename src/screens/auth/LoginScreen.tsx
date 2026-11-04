@@ -1,11 +1,12 @@
 /** 01 · Sign in — gradient hero, session-expiry notice, focused field state. */
 import React, { useEffect, useRef, useState } from "react";
-import { Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, TextInput, View, useWindowDimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { StatusBar } from "expo-status-bar";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { G, Path } from "react-native-svg";
 import { ArrowRight, Check, Lock, Mail, Ship } from "lucide-react-native";
+import { showAlert } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { Notice } from "@/components/Screen";
 import { TextField } from "@/components/TextField";
@@ -162,7 +163,7 @@ export function LoginScreen() {
               <Pressable
                 hitSlop={8}
                 onPress={() =>
-                  Alert.alert("Forgot password?", "Passwords are managed by your admin. Ask them to reset yours from Team on the web console.")
+                  showAlert("Forgot password?", "Passwords are managed by your admin. Ask them to reset yours from Team on the web console.")
                 }
               >
                 <Txt size={13.5} weight="semibold" color={t.primary}>

@@ -10,6 +10,10 @@ export type BookingFilter = "all" | BookingListTab;
 export type MoreStackParamList = {
   MoreHome: undefined;
   Finance: { tab?: "invoices" | "receipts" | "expenses" } | undefined;
+  /** Bookings in a month / date range, grouped container-, customer- or country-wise. */
+  BookingReports: undefined;
+  /** Web console's Receipt entry list. */
+  Receipts: undefined;
   MasterList: { masterKey: MasterKey };
   /** Web console's Stuffing → "Stuffed list": every stuffed container. */
   StuffedContainers: undefined;

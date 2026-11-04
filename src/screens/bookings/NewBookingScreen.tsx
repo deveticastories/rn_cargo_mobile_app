@@ -1,8 +1,9 @@
 /** 05 · New booking — 3-step form with segmented controls and live charge hints. */
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowRight, Info, Minus, Plus, X } from "lucide-react-native";
+import { showAlert } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { DatePickerField } from "@/components/DatePickerField";
 import { Card, Chip, DashedDivider, IconButton } from "@/components/primitives";
@@ -148,10 +149,12 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
 
   const close = () => {
     if (senderId || receiverId) {
-      Alert.alert("Discard booking?", "What you've entered will be lost.", [
-        { text: "Keep editing", style: "cancel" },
-        { text: "Discard", style: "destructive", onPress: () => navigation.goBack() },
-      ]);
+      showAlert("Discard booking?", "What you've entered will be lost.", {
+        confirmLabel: "Discard",
+        cancelLabel: "Keep editing",
+        destructive: true,
+        onConfirm: () => navigation.goBack(),
+      });
     } else navigation.goBack();
   };
 

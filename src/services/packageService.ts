@@ -12,6 +12,7 @@ export interface PackingLine {
   productId: string;
   quantity: number;
   fabricId?: string;
+  unitId?: string;
   description?: string;
 }
 
@@ -44,6 +45,7 @@ function toPackingList(doc: BackendDoc): BookingPackingList {
           productId: refId(p.product),
           quantity: num(p.quantity),
           fabricId: p.fabric ? refId(p.fabric) : undefined,
+          unitId: p.unit ? refId(p.unit) : undefined,
           description: p.description ? str(p.description) : undefined,
         })),
       }))
@@ -56,7 +58,7 @@ const toBackendBundle = (b: Omit<SavedBundle, "id"> & { id?: string }) => ({
   bundleNo: b.bundleNo,
   netWeight: b.netWeight,
   grossWeight: b.grossWeight,
-  products: b.lines.map((l) => ({ product: l.productId, quantity: l.quantity, fabric: l.fabricId || undefined, description: l.description || undefined })),
+  products: b.lines.map((l) => ({ product: l.productId, quantity: l.quantity, fabric: l.fabricId || undefined, unit: l.unitId || undefined, description: l.description || undefined })),
 });
 
 export const packageService = {

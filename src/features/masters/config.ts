@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Globe,
   Package,
+  Ruler,
   Shirt,
   Store,
   Tag,
@@ -21,6 +22,7 @@ import { API_ENDPOINTS } from "@/api/endpoints";
 import type { BackendDoc } from "@/types";
 import type { Tone } from "@/theme/palette";
 import { money } from "@/utils/format";
+import { canonicalPlace } from "@/utils/pricing";
 import { refField, str } from "@/services/mappers";
 
 export type MasterKey =
@@ -33,6 +35,7 @@ export type MasterKey =
   | "pricing"
   | "products"
   | "fabrics"
+  | "units"
   | "pickupAssigns"
   | "preBookings";
 
@@ -53,6 +56,8 @@ export interface FieldDef {
   optionalOnEdit?: boolean;
   /** Pre-filled on a new record (and sent even when the field is hidden). */
   defaultValue?: string;
+  /** For `ref` fields: pre-selects the matching active record on a new record, once its master has loaded. */
+  defaultRef?: (doc: BackendDoc) => boolean;
   /** Not shown at all in this context. */
   hidden?: (ctx: FormContext) => boolean;
   /** Shown but locked in this context; its value is never sent. */
@@ -85,6 +90,8 @@ export interface MasterDef {
   icon: IconType;
   tone: Tone;
   hasStatus: boolean;
+  /** Status kept as an "Active"/"Inactive" string in this field instead of the boolean `status`. */
+  statusKey?: string;
   fields: FieldDef[];
   primary: (doc: BackendDoc) => string;
   secondary: (doc: BackendDoc) => string;
@@ -101,6 +108,14 @@ export interface MasterDef {
   /** Whether a record may be deleted (default: always). */
   canDelete?: (doc: BackendDoc) => boolean;
 }
+
+/** Whether a record is active, whichever way its module stores status. */
+export const isActive = (def: MasterDef, doc: BackendDoc) =>
+  def.statusKey ? doc[def.statusKey] !== "Inactive" : doc.status !== false;
+
+/** The fields that set a record's status. */
+export const statusPayload = (def: MasterDef, active: boolean): Record<string, unknown> =>
+  def.statusKey ? { [def.statusKey]: active ? "Active" : "Inactive" } : { status: active };
 
 /** Pickup assigns: "Collected" with every assigned bundle collected — the count is final. */
 export const pickupFullyCollected = (d: BackendDoc) =>
@@ -205,7 +220,7 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     fields: [
       { key: "name", label: "Name", type: "text", required: true },
       { key: "whatsapp", label: "WhatsApp", type: "phone", required: true },
-      { key: "from", label: "From", type: "ref", ref: { master: "countries", labelKey: "name" }, required: true },
+      { key: "from", label: "From", type: "ref", ref: { master: "countries", labelKey: "name" }, required: true, defaultRef: (d) => canonicalPlace(d.name) === "UAE" },
       { key: "toCountry", label: "To", type: "ref", ref: { master: "countries", labelKey: "name" }, required: true },
       { key: "charge", label: "Charge", type: "number" },
     ],
@@ -273,6 +288,21 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     primary: name,
     secondary: () => "Packing list fabric",
     fields: [{ key: "name", label: "Fabric name", type: "text", required: true }],
+  },
+  units: {
+    key: "units",
+    title: "Units",
+    singular: "unit",
+    endpoint: API_ENDPOINTS.UNITS.BASE,
+    listKey: "units",
+    itemKey: "unit",
+    icon: Ruler,
+    tone: "info",
+    hasStatus: true,
+    statusKey: "unitStatus",
+    primary: name,
+    secondary: () => "Unit of measure",
+    fields: [{ key: "name", label: "Unit name", type: "text", required: true, placeholder: "Kilogram" }],
   },
   pickupAssigns: {
     key: "pickupAssigns",
@@ -367,6 +397,7 @@ export const MASTER_GRID: MasterKey[] = [
   "pricing",
   "products",
   "fabrics",
+  "units",
 ];
 
 /** Turns a raw doc into editable string form values (refs → their id, dates → YYYY-MM-DD). */

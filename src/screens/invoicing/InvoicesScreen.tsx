@@ -5,9 +5,10 @@
  * (an existing invoice is just reprinted). Every invoice so far is listed below.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, KeyboardAvoidingView, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Download, FileText } from "lucide-react-native";
 import { errorMessage } from "@/api/client";
+import { showAlert, showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { Card, DashedDivider, IconTile, SectionTitle } from "@/components/primitives";
 import { LargeHeader, Notice, Screen } from "@/components/Screen";
@@ -143,7 +144,7 @@ export function InvoicesScreen() {
   };
 
   const generate = async () => {
-    if (!booking || !container) return Alert.alert("Choose a booking first.");
+    if (!booking || !container) return showAlert("Choose a booking first.");
     setGenerating(true);
     try {
       if (invoice) {
@@ -156,10 +157,12 @@ export function InvoicesScreen() {
         bookingId: booking.id,
         deliveryPartnerId: partner._id,
       });
-      await dispatch(fetchFinance());
+      // The PDF only needs the invoice just returned, so the finance lists refresh alongside it rather than first.
+      const refreshed = dispatch(fetchFinance());
       await printInvoice(created);
+      await refreshed;
     } catch (e) {
-      Alert.alert("Couldn't save the invoice", errorMessage(e, "Failed to save the invoice."));
+      showError("Couldn't save the invoice", errorMessage(e, "Failed to save the invoice."));
     } finally {
       setGenerating(false);
     }
@@ -172,7 +175,7 @@ export function InvoicesScreen() {
       saveMaster({ key: "pricing", values: { from: "India", to: "UAE", uom: booking.bundleType, price: newPrice } })
     );
     setSavingPrice(false);
-    if (saveMaster.rejected.match(result)) Alert.alert("Couldn't save the price", String(result.payload ?? "Please try again."));
+    if (saveMaster.rejected.match(result)) showError("Couldn't save the price", String(result.payload ?? "Please try again."));
     else setNewPrice("");
   };
 
@@ -183,7 +186,7 @@ export function InvoicesScreen() {
     const values = { ...docToFormValues(MASTERS.deliveryPartners, partner), charge: newCharge };
     const result = await dispatch(saveMaster({ key: "deliveryPartners", id: partner._id, values }));
     setSavingCharge(false);
-    if (saveMaster.rejected.match(result)) Alert.alert("Couldn't save the charge", String(result.payload ?? "Please try again."));
+    if (saveMaster.rejected.match(result)) showError("Couldn't save the charge", String(result.payload ?? "Please try again."));
     else setNewCharge("");
   };
 
@@ -192,7 +195,7 @@ export function InvoicesScreen() {
     try {
       await printInvoice(inv);
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setPrintingId(null);
     }
@@ -251,8 +254,6 @@ export function InvoicesScreen() {
             {booking && (
               <>
                 <View style={{ marginVertical: 4 }}>
-                  <TotalRow label="Receiver" value={booking.receiver.name || "—"} />
-                  <TotalRow label="Receiver country" value={lookup.receiverCountry(booking) || "—"} />
                   <TotalRow
                     label={`Route price (${route ? `${canonicalPlace(route.from)} → ${canonicalPlace(route.to)}, per ${str(route.uom)}` : "no route matched"})`}
                     value={`${money(invoice ? (qty ? invoice.subtotal / qty : 0) : rate)} × ${qty}`}
@@ -266,7 +267,7 @@ export function InvoicesScreen() {
                   <TextField label="Delivery partner" value={invoice.deliveryPartner || "—"} editable={false} hint="Already invoiced — can't be changed." />
                 ) : (
                   <SelectField
-                    label="Delivery partner"
+                    label="Delivery partner *"
                     placeholder="Choose delivery partner"
                     value={partner?._id ?? ""}
                     options={partnerChoices}
@@ -277,7 +278,15 @@ export function InvoicesScreen() {
                     emptyText="No active delivery partners — add one under More → Delivery."
                   />
                 )}
-                {deliveryCharge !== undefined && <TotalRow label="Delivery partner charges" value={money(deliveryCharge)} />}
+                <TotalRow label="Receiver" value={booking.receiver.name || "—"} />
+                <TotalRow label="Receiver country" value={lookup.receiverCountry(booking) || "—"} />
+                {/* Like the web: the partner's charge is added to the total once a partner is chosen. */}
+                {deliveryCharge !== undefined && (
+                  <TotalRow
+                    label={`Delivery partner charge (${(invoice ? invoice.deliveryPartner : str(partner?.name)) || "—"})`}
+                    value={`+${money(deliveryCharge)}`}
+                  />
+                )}
                 {needsCharge && (
                   <View style={styles.priceRow}>
                     <View style={{ flex: 1 }}>
@@ -303,7 +312,7 @@ export function InvoicesScreen() {
                 )}
 
                 <DashedDivider />
-                <TotalRow label="Total" value={money(invoice?.amount ?? subtotal + additional - discount)} strong />
+                <TotalRow label="Total" value={money(invoice?.amount ?? subtotal + additional - discount + (deliveryCharge ?? 0))} strong />
 
                 {invoice ? (
                   <Txt size={12.5} muted style={{ marginTop: 6 }}>

@@ -33,9 +33,12 @@ interface DatePickerFieldProps {
   placeholder?: string;
   value: string;
   onChange: (iso: string) => void;
+  /** Earliest / latest pickable day ("YYYY-MM-DD"); days outside are greyed out. */
+  minDate?: string;
+  maxDate?: string;
 }
 
-export function DatePickerField({ label, placeholder = "Select date", value, onChange }: DatePickerFieldProps) {
+export function DatePickerField({ label, placeholder = "Select date", value, onChange, minDate, maxDate }: DatePickerFieldProps) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
   const display = formatLabel(value);
@@ -62,6 +65,8 @@ export function DatePickerField({ label, placeholder = "Select date", value, onC
         visible={open}
         title={label ?? placeholder}
         value={value}
+        minDate={minDate}
+        maxDate={maxDate}
         onClose={() => setOpen(false)}
         onSelect={(iso) => {
           onChange(iso);
@@ -76,12 +81,16 @@ function DatePickerSheet({
   visible,
   title,
   value,
+  minDate,
+  maxDate,
   onSelect,
   onClose,
 }: {
   visible: boolean;
   title: string;
   value: string;
+  minDate?: string;
+  maxDate?: string;
   onSelect: (iso: string) => void;
   onClose: () => void;
 }) {
@@ -89,8 +98,19 @@ function DatePickerSheet({
   const insets = useSafeAreaInsets();
   const now = new Date();
   const today = toISO(now.getFullYear(), now.getMonth(), now.getDate());
-  const initial = parseISO(value) ?? { y: now.getFullYear(), m: now.getMonth(), d: now.getDate() };
+  const initial = parseISO(value) ?? parseISO(minDate ?? "") ?? { y: now.getFullYear(), m: now.getMonth(), d: now.getDate() };
   const [view, setView] = useState({ y: initial.y, m: initial.m });
+  const outOfRange = (iso: string) => (!!minDate && iso < minDate) || (!!maxDate && iso > maxDate);
+  // Months are numbered y * 12 + m; the arrows stop at the months holding minDate / maxDate.
+  const monthIndex = (iso?: string) => {
+    const p = iso ? parseISO(iso) : null;
+    return p ? p.y * 12 + p.m : null;
+  };
+  const minMonth = monthIndex(minDate);
+  const maxMonth = monthIndex(maxDate);
+  const current = view.y * 12 + view.m;
+  const canPrev = minMonth === null || current > minMonth;
+  const canNext = maxMonth === null || current < maxMonth;
 
   const shiftMonth = (delta: number) =>
     setView(({ y, m }) => {
@@ -125,15 +145,23 @@ function DatePickerSheet({
           </View>
 
           <View style={styles.monthRow}>
-            <Pressable onPress={() => shiftMonth(-1)} hitSlop={10} style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]} accessibilityLabel="Previous month">
-              <ChevronLeft size={18} color={t.text} />
-            </Pressable>
+            {canPrev ? (
+              <Pressable onPress={() => shiftMonth(-1)} hitSlop={10} style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]} accessibilityLabel="Previous month">
+                <ChevronLeft size={18} color={t.text} />
+              </Pressable>
+            ) : (
+              <View style={styles.navBtn} />
+            )}
             <Txt size={15} weight="bold">
               {MONTH_NAMES[view.m]} {view.y}
             </Txt>
-            <Pressable onPress={() => shiftMonth(1)} hitSlop={10} style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]} accessibilityLabel="Next month">
-              <ChevronRight size={18} color={t.text} />
-            </Pressable>
+            {canNext ? (
+              <Pressable onPress={() => shiftMonth(1)} hitSlop={10} style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]} accessibilityLabel="Next month">
+                <ChevronRight size={18} color={t.text} />
+              </Pressable>
+            ) : (
+              <View style={styles.navBtn} />
+            )}
           </View>
 
           <View style={styles.grid}>
@@ -149,13 +177,16 @@ function DatePickerSheet({
               const iso = toISO(view.y, view.m, day);
               const selected = iso === value;
               const isToday = iso === today;
+              const disabled = outOfRange(iso);
               return (
                 <View key={iso} style={styles.cell}>
                   <Pressable
                     onPress={() => onSelect(iso)}
+                    disabled={disabled}
                     accessibilityRole="button"
-                    accessibilityState={{ selected }}
+                    accessibilityState={{ selected, disabled }}
                     style={[
+                      disabled && { opacity: 0.3 },
                       styles.day,
                       selected && { backgroundColor: t.primary },
                       !selected && isToday && { borderWidth: 1.5, borderColor: t.primary },
@@ -170,7 +201,7 @@ function DatePickerSheet({
             })}
           </View>
 
-          <Pressable onPress={() => onSelect(today)} style={[styles.todayBtn, { borderColor: t.border }]}>
+          <Pressable onPress={() => onSelect(today)} disabled={outOfRange(today)} style={[styles.todayBtn, { borderColor: t.border }, outOfRange(today) && { opacity: 0.4 }]}>
             <Txt size={14} weight="semibold" color={t.primary}>
               Today
             </Txt>

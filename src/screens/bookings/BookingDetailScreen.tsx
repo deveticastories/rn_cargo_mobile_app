@@ -1,9 +1,10 @@
 /** 04 · Booking detail — progress timeline, contacts, shipment, charges, next action. */
 import React, { useEffect, useState } from "react";
-import { Alert, Linking, ScrollView, Share, StyleSheet, View } from "react-native";
+import { Linking, ScrollView, Share, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowRight, Check, ChevronLeft, Download, EllipsisVertical, FileText, Loader, MessageCircle, Phone, Share2, Trash2 } from "lucide-react-native";
 import { ActionSheet, BottomSheet } from "@/components/ActionSheet";
+import { showAlert, showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Avatar, Card, DashedDivider, IconButton, SectionTitle } from "@/components/primitives";
@@ -114,7 +115,7 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
 
   const run = async (action: () => Promise<{ meta: { requestStatus: string }; payload?: unknown }>) => {
     const result = await action();
-    if (result.meta.requestStatus === "rejected") Alert.alert("Couldn't update", String(result.payload ?? "Please try again."));
+    if (result.meta.requestStatus === "rejected") showError("Couldn't update", String(result.payload ?? "Please try again."));
   };
 
   const summary = bookingSummary(booking, senderPlace, receiverPlace);
@@ -132,7 +133,7 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
         lines: [receiverPlace, receiverInfo?.whatsapp ? `Ph: ${receiverInfo.whatsapp}` : ""],
       }, invoiceExtras);
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(false);
     }
@@ -155,7 +156,7 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
         bundleMark: booking.code,
       });
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setSharingPdf(false);
     }
@@ -178,12 +179,12 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
 
   const openChat = (phone?: string) => {
     const n = digits(phone).replace(/^\+/, "");
-    if (!n) return Alert.alert("No WhatsApp number", "Add one on the customer record.");
+    if (!n) return showAlert("No WhatsApp number", "Add one on the customer record.");
     void Linking.openURL(`https://wa.me/${n}`);
   };
   const call = (phone?: string) => {
     const n = digits(phone);
-    if (!n) return Alert.alert("No phone number", "Add one on the customer record.");
+    if (!n) return showAlert("No phone number", "Add one on the customer record.");
     void Linking.openURL(`tel:${n}`);
   };
 

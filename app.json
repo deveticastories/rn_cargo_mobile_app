@@ -44,13 +44,13 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true,
-            "extraMavenRepos": ["../node_modules/@notifee/react-native/android/libs"]
+            "usesCleartextTraffic": true
           }
         }
       ],
       "react-native-blob-util",
-      "expo-asset"
+      "expo-asset",
+      "./plugins/withNotifeeMaven"
     ],
     "extra": {
       "eas": {

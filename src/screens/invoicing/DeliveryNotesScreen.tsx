@@ -4,8 +4,9 @@
  * packing lists, and save a delivery note PDF per booking straight to Downloads.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { Check, Download } from "lucide-react-native";
+import { showAlert, showError } from "@/components/AppAlert";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/primitives";
 import { LargeHeader, Screen } from "@/components/Screen";
@@ -106,7 +107,7 @@ export function DeliveryNotesScreen() {
   };
 
   const download = async () => {
-    if (picked.length === 0) return Alert.alert("Choose at least one booking first.");
+    if (picked.length === 0) return showAlert("Choose at least one booking first.");
     setDownloading(true);
     try {
       const files = await Promise.all(
@@ -125,7 +126,7 @@ export function DeliveryNotesScreen() {
       // Saved to Downloads one file per booking, each with its own notification.
       await downloadPdfs(files);
     } catch (e) {
-      Alert.alert("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
+      showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
       setDownloading(false);
     }

@@ -5,6 +5,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { store } from "@/store";
+import { AlertHost } from "@/components/AppAlert";
 import { AnimatedSplash } from "@/components/AnimatedSplash";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { restoreSession } from "@/store/slices/authSlice";
@@ -39,6 +40,7 @@ function Bootstrap() {
   return (
     <View style={{ flex: 1 }}>
       <RootNavigator />
+      <AlertHost />
       {!splashDone && <AnimatedSplash ready={restored} onFinish={finishSplash} />}
     </View>
   );

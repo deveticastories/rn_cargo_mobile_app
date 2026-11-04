@@ -3,7 +3,7 @@ import React, { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Constants from "expo-constants";
-import { ArrowLeftRight, ChartColumn, ChevronRight, LogOut, Repeat, Ship } from "lucide-react-native";
+import { ArrowLeftRight, ChartColumn, ChevronRight, FileBarChart, LogOut, ReceiptText, Repeat, Ship } from "lucide-react-native";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconTile, SectionTitle } from "@/components/primitives";
 import { LargeHeader, Screen } from "@/components/Screen";
@@ -67,7 +67,7 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
 
         {/* Masters (finance users only need Containers) */}
         <SectionTitle title="Masters" />
-        <View style={[styles.grid, financeMode && { justifyContent: "flex-start" }]}>
+        <View style={[styles.grid, financeMode && { justifyContent: "flex-start", columnGap: 10 }]}>
           {!financeMode &&
             MASTER_GRID.map((key) => {
               const def = MASTERS[key];
@@ -86,6 +86,14 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
               <IconTile icon={Ship} tone="info" size={38} />
               <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
                 Containers
+              </Txt>
+            </Card>
+          )}
+          {financeMode && (
+            <Card style={styles.gridItem} onPress={() => navigation.navigate("Receipts")}>
+              <IconTile icon={ReceiptText} tone="success" size={38} />
+              <Txt size={12.5} weight="semibold" style={{ marginTop: 8 }} numberOfLines={1}>
+                Receipts
               </Txt>
             </Card>
           )}
@@ -139,7 +147,8 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
         {/* Account */}
         <SectionTitle title="Account" />
         <Card padded={false}>
-          <OpRow icon={ChartColumn} tone="info" label="Reports" onPress={() => navigation.navigate("Finance")} />
+          <OpRow icon={FileBarChart} tone="purple" label="Reports" onPress={() => navigation.navigate("BookingReports")} />
+          <OpRow icon={ChartColumn} tone="info" label="Finance" onPress={() => navigation.navigate("Finance")} />
           <OpRow icon={LogOut} tone="danger" label="Log out" onPress={signOut} destructive last />
         </Card>
         <Txt size={11.5} soft align="center" style={{ marginTop: 14 }}>

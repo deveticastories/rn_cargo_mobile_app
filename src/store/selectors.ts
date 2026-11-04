@@ -1,6 +1,6 @@
 /** Memoized derived data shared by several screens. */
 import { createSelector } from "@reduxjs/toolkit";
-import type { Booking, Container, Invoice } from "@/types";
+import type { Booking, Container, Invoice, ReceiptEntry } from "@/types";
 import type { Tone } from "@/theme/palette";
 import { daysFromToday, isSameMonth, parseDate } from "@/utils/format";
 import type { RootState } from "./index";
@@ -60,6 +60,21 @@ export function containerPhase(c: Container): ContainerPhase {
   if (toEta !== null && toEta <= 0) return "arrived";
   if (toEtd !== null && toEtd <= 0) return "atSea";
   return "stuffed";
+}
+
+/** The container to finish loading next: active and not stuffed yet, soonest cut-off first. */
+export const selectNextContainer = createSelector([(s: RootState) => s.containers.items], (items): Container | undefined =>
+  items
+    .filter((c) => c.status !== "Inactive" && containerPhase(c) === "loading")
+    .sort((a, b) => (a.cutOffDate ?? "9999").localeCompare(b.cutOffDate ?? "9999"))[0]
+);
+
+/** Days-to-cut-off wording for a container that's still loading. */
+export function cutOffLabel(toCutoff: number | null): string {
+  if (toCutoff === null) return "No cut-off set";
+  if (toCutoff < 0) return "Cut-off passed";
+  if (toCutoff === 0) return "Cut-off today";
+  return `${toCutoff} day${toCutoff === 1 ? "" : "s"} to cut-off`;
 }
 
 /** Bookings loaded into each container, from the stuffing records. */
@@ -164,6 +179,29 @@ export const selectReceivedByInvoice = createSelector([(s: RootState) => s.finan
   for (const r of receipts) map.set(r.invoiceId, (map.get(r.invoiceId) ?? 0) + r.receivedAmount);
   return map;
 });
+
+export type ReceiptRowData = { receipt: ReceiptEntry; party: string };
+
+/** Receipt entries newest first, each with the customer from its invoice's booking. */
+export const selectReceiptRows = createSelector(
+  [(s: RootState) => s.finance.receipts, (s: RootState) => s.finance.invoices, selectBookingItems],
+  (receipts, invoices, bookings): ReceiptRowData[] => {
+    const bookingIdOf = new Map(invoices.map((inv) => [inv.id, inv.bookingId]));
+    const bookingById = new Map(bookings.map((b) => [b.id, b]));
+    return [...receipts]
+      .sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0))
+      .map((receipt) => {
+        const booking = bookingById.get(bookingIdOf.get(receipt.invoiceId) ?? "");
+        return { receipt, party: booking?.receiver.name || booking?.sender.name || "" };
+      });
+  }
+);
+
+/** All invoices: what they total, and what's still unpaid after receipts. */
+export const selectReceivables = createSelector([(s: RootState) => s.finance.invoices, selectReceivedByInvoice], (invoices, received) => ({
+  total: invoices.reduce((sum, inv) => sum + inv.amount, 0),
+  outstanding: invoices.reduce((sum, inv) => sum + Math.max(0, inv.amount - (received.get(inv.id) ?? 0)), 0),
+}));
 
 export function invoiceStatus(inv: Invoice, received: number): InvoiceStatus {
   if (received >= inv.amount && inv.amount > 0) return "Paid";
