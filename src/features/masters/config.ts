@@ -49,7 +49,7 @@ export interface FieldDef {
   placeholder?: string;
   options?: string[];
   /** For `ref` fields: which master the options come from and how to label them. */
-  ref?: { master: MasterKey; labelKey: string; filter?: (doc: BackendDoc) => boolean };
+  ref?: { master: MasterKey; labelKey: string; filter?: (doc: BackendDoc, ctx: FormContext) => boolean };
   /** Only shown when this returns true for the current form values. */
   visibleWhen?: (values: Record<string, string>) => boolean;
   /** Password-style fields: blank on edit means "keep current". */
@@ -76,7 +76,23 @@ export interface FieldDef {
 export interface FormContext {
   isEdit: boolean;
   initial: Record<string, string>;
+  /** The saved record, for rules that depend on fields not on the form. */
+  doc?: BackendDoc;
+  /** Signed in with the Pickup role. */
+  pickupMode?: boolean;
 }
+
+/** Pickup partners that aren't a transport: "Direct to Store" and "Our pickup boy". */
+const isInHousePickup = (d: BackendDoc) => /^\s*(direct\s*to\s*store|our\s*pick\s*-?\s*up\s*boy|our\s*pick\s*boy)\s*$/i.test(str(d.name));
+
+/** Pickup assign saved as Paid. */
+const isPaid = (ctx: FormContext) => ctx.isEdit && ctx.initial.paymentStatus === "Paid";
+/** Pickup assign saved as Collected. */
+const isCollected = (ctx: FormContext) => ctx.isEdit && Boolean(ctx.doc) && pickupStarted(ctx.doc!);
+/** Pickup assign with every bundle collected. */
+const isFullyCollected = (ctx: FormContext) => ctx.isEdit && Boolean(ctx.doc) && pickupFullyCollected(ctx.doc!);
+/** Pickup details are fixed once the pickup is paid or collected. */
+const pickupClosed = (ctx: FormContext) => isPaid(ctx) || isCollected(ctx);
 
 type IconType = ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 
@@ -109,6 +125,12 @@ export interface MasterDef {
   adjustPayload?: (payload: Record<string, unknown>, ctx: FormContext) => void;
   /** Whether a record may be deleted (default: always). */
   canDelete?: (doc: BackendDoc) => boolean;
+  /** A saved record that can no longer be edited: returns why (the form shows it read-only, without Save). */
+  locked?: (ctx: FormContext) => string | null;
+  /** The edit form re-reads the record from the server (GET endpoint/:id) before showing it. */
+  loadOnEdit?: boolean;
+  /** A note shown at the top of the form (e.g. why some fields are locked). */
+  notice?: (ctx: FormContext) => string | null;
 }
 
 /** Whether a record is active, whichever way its module stores status. */
@@ -119,9 +141,18 @@ export const isActive = (def: MasterDef, doc: BackendDoc) =>
 export const statusPayload = (def: MasterDef, active: boolean): Record<string, unknown> =>
   def.statusKey ? { [def.statusKey]: active ? "Active" : "Inactive" } : { status: active };
 
-/** Pickup assigns: "Collected" with every assigned bundle collected — the count is final. */
-export const pickupFullyCollected = (d: BackendDoc) =>
-  d.pickupStatus === "Collected" && Number(d.collectedBundle ?? 0) >= Number(d.bundleCount ?? 0);
+/** Pickup assigns: some bundles recorded — cargo-backend's "Collected" or "Partially Collected". */
+export const pickupStarted = (d: BackendDoc) => d.pickupStatus === "Collected" || d.pickupStatus === "Partially Collected";
+
+/** Bundles collected so far (0 while the pickup is pending). */
+export const pickupCollectedCount = (d: BackendDoc) => (pickupStarted(d) ? Number(d.collectedBundle ?? 0) : 0);
+
+/** Pickup assigns: every assigned bundle collected — the count is final. */
+export const pickupFullyCollected = (d: BackendDoc) => pickupStarted(d) && pickupCollectedCount(d) >= Number(d.bundleCount ?? 0);
+
+/** The pickup status cargo-backend uses for a collected count. */
+export const pickupStatusFor = (collected: number, assigned: number) =>
+  collected <= 0 ? "Pending" : collected >= assigned ? "Collected" : "Partially Collected";
 
 const name = (doc: BackendDoc) => str(doc.name);
 const join = (...parts: unknown[]) => parts.filter((p) => p !== undefined && p !== null && p !== "").map(String).join(" · ");
@@ -317,24 +348,44 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     tone: "info",
     hasStatus: true,
     dependsOn: ["pickupPartners"],
+    loadOnEdit: true,
     primary: (d) => `LR ${str(d.lrNo)}`,
     secondary: (d) =>
       join(
         str(refField(d.transport, "name")),
-        d.pickupStatus === "Collected"
+        pickupStarted(d)
           ? `${str(d.collectedBundle ?? 0)}/${str(d.bundleCount)} collected · balance ${Math.max(0, Number(d.bundleCount ?? 0) - Number(d.collectedBundle ?? 0))}`
           : `${str(d.bundleCount)} bundles`,
         money(Number(d.amount ?? 0)),
         d.paymentStatus
       ),
+    // From the counts, so an older record saved as "Collected" with bundles still due reads as partial.
     badge: (d) =>
-      d.pickupStatus ? { label: str(d.pickupStatus), tone: d.pickupStatus === "Collected" ? "success" : "warning" } : null,
+      pickupFullyCollected(d)
+        ? { label: "Collected", tone: "success" }
+        : pickupStarted(d)
+          ? { label: "Partially collected", tone: "info" }
+          : { label: "Pending", tone: "warning" },
     fields: [
-      { key: "transport", label: "Transport", type: "ref", ref: { master: "pickupPartners", labelKey: "name" }, required: true },
-      { key: "lrNo", label: "LR No", type: "text", required: true },
-      { key: "bundleCount", label: "Bundle count", type: "number", required: true },
-      { key: "amount", label: "Amount", type: "number", required: true },
-      // New pickups start Unpaid. An Unpaid pickup can still be marked Paid when edited; once Paid it's locked.
+      {
+        key: "transport",
+        label: "Transport",
+        type: "ref",
+        // The Pickup role picks a real transport, not "Direct to Store" / "Our pickup boy" (a pickup already saved with one keeps it).
+        ref: {
+          master: "pickupPartners",
+          labelKey: "name",
+          filter: (d, ctx) => !(ctx.pickupMode && isInHousePickup(d) && d._id !== ctx.initial.transport),
+        },
+        required: true,
+        readOnly: pickupClosed,
+      },
+      { key: "lrNo", label: "LR No", type: "text", required: true, readOnly: pickupClosed },
+      { key: "bundleCount", label: "Bundle count", type: "number", required: true, readOnly: pickupClosed },
+      // Nothing is collected on a new pickup; editing can correct the count.
+      { key: "collectedBundle", label: "Collected bundles", type: "number", hidden: (ctx) => !ctx.isEdit, readOnly: isFullyCollected, placeholder: "0" },
+      { key: "amount", label: "Amount", type: "number", required: true, readOnly: pickupClosed },
+      // New pickups start Unpaid. An Unpaid pickup can still be marked Paid when edited; once Paid the whole record is locked.
       {
         key: "paymentStatus",
         label: "Payment",
@@ -342,17 +393,33 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
         options: ["Unpaid", "Paid"],
         required: true,
         defaultValue: "Unpaid",
-        readOnly: (ctx) => ctx.isEdit && ctx.initial.paymentStatus === "Paid",
+        readOnly: isPaid,
         finalValue: "Paid",
         // Same question the web console asks before a payment status changes.
         confirmChange: (next) => ({ title: "Change payment status?", message: `Are you sure you want to change the payment status to ${next}?` }),
       },
       // Pickup status isn't on the form: like the web console, it's set from the list by recording collected bundles.
     ],
+    validate: (values) =>
+      Number(values.collectedBundle || 0) > Number(values.bundleCount || 0) ? "Collected bundles can't be more than the bundle count." : null,
     adjustPayload: (payload, ctx) => {
       if (!ctx.isEdit) payload.pickupStatus = "Pending";
+      // Same as recording collected bundles from the list.
+      else if (payload.collectedBundle !== undefined) {
+        payload.pickupStatus = pickupStatusFor(Number(payload.collectedBundle), Number(payload.bundleCount ?? ctx.initial.bundleCount ?? 0));
+      }
     },
-    canDelete: (d) => d.pickupStatus !== "Collected",
+    canDelete: (d) => !pickupStarted(d) && d.paymentStatus !== "Paid",
+    // Paid: only the collected bundles can be updated. Collected: only the payment. Both: closed.
+    locked: (ctx) => (isPaid(ctx) && isFullyCollected(ctx) ? "This pickup is paid and collected, so it can't be edited." : null),
+    notice: (ctx) =>
+      isPaid(ctx)
+        ? "This pickup is paid — only the collected bundles can be updated."
+        : isFullyCollected(ctx)
+          ? "This pickup is collected — only the payment can be updated."
+          : isCollected(ctx)
+            ? "This pickup is partially collected — only the payment and collected bundles can be updated."
+            : null,
   },
   preBookings: {
     key: "preBookings",
@@ -385,8 +452,14 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
       { key: "date", label: "Date", type: "date", required: true },
       { key: "bundleCount", label: "Bundle count", type: "number", required: true },
       { key: "bundleType", label: "Bundle type", type: "select", options: BUNDLE_TYPES, required: true },
-      { key: "preBookingStatus", label: "Status", type: "select", options: ["Pending", "Collected", "Canceled"] },
+      { key: "preBookingStatus", label: "Status", type: "select", options: ["Pending", "Collected", "Canceled"], required: true, defaultValue: "Pending" },
     ],
+    // Collected and Canceled pre-bookings are closed: view only, no delete.
+    locked: (ctx) =>
+      ctx.isEdit && (ctx.initial.preBookingStatus === "Collected" || ctx.initial.preBookingStatus === "Canceled")
+        ? `This pre-booking is ${ctx.initial.preBookingStatus === "Collected" ? "collected" : "cancelled"}, so it can't be edited.`
+        : null,
+    canDelete: (d) => d.preBookingStatus !== "Collected" && d.preBookingStatus !== "Canceled",
   },
 };
 

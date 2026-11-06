@@ -133,7 +133,6 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
       bundleHandlingCharge: Number(bundleCharge) || 0,
     };
     setSaving(true);
-    console.log(input)
     const result = await dispatch(createBooking(input));
     setSaving(false);
     if (createBooking.fulfilled.match(result)) {

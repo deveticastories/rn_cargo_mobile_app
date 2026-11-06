@@ -14,7 +14,7 @@ interface LoginResponse {
   user?: { id?: string; _id?: string; email: string; role?: unknown; name?: string };
 }
 
-/** The role's name, whether it comes as "Fin", { name: "Fin" } or ["Fin"]. */
+/** The role's name, whether it comes as "Transit", { name: "Transit" } or ["Transit"]. */
 export function roleName(role: unknown): string {
   if (typeof role === "string") return role.trim();
   if (Array.isArray(role)) return role.map(roleName).find(Boolean) ?? "";

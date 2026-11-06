@@ -5,7 +5,7 @@
 import React, { useState } from "react";
 import { Modal, Pressable, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Calendar, ChevronLeft, ChevronRight, X } from "lucide-react-native";
+import { Calendar, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, X } from "lucide-react-native";
 import { radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import { Txt } from "./Txt";
@@ -100,6 +100,8 @@ function DatePickerSheet({
   const today = toISO(now.getFullYear(), now.getMonth(), now.getDate());
   const initial = parseISO(value) ?? parseISO(minDate ?? "") ?? { y: now.getFullYear(), m: now.getMonth(), d: now.getDate() };
   const [view, setView] = useState({ y: initial.y, m: initial.m });
+  // Tapping the month title switches to a year + month grid for jumping far.
+  const [picking, setPicking] = useState(false);
   const outOfRange = (iso: string) => (!!minDate && iso < minDate) || (!!maxDate && iso > maxDate);
   // Months are numbered y * 12 + m; the arrows stop at the months holding minDate / maxDate.
   const monthIndex = (iso?: string) => {
@@ -111,6 +113,10 @@ function DatePickerSheet({
   const current = view.y * 12 + view.m;
   const canPrev = minMonth === null || current > minMonth;
   const canNext = maxMonth === null || current < maxMonth;
+
+  const minYear = minMonth === null ? null : Math.floor(minMonth / 12);
+  const maxYear = maxMonth === null ? null : Math.floor(maxMonth / 12);
+  const monthDisabled = (m: number) => (minMonth !== null && view.y * 12 + m < minMonth) || (maxMonth !== null && view.y * 12 + m > maxMonth);
 
   const shiftMonth = (delta: number) =>
     setView(({ y, m }) => {
@@ -129,7 +135,10 @@ function DatePickerSheet({
       animationType="slide"
       transparent
       onRequestClose={onClose}
-      onShow={() => setView({ y: initial.y, m: initial.m })}
+      onShow={() => {
+        setView({ y: initial.y, m: initial.m });
+        setPicking(false);
+      }}
     >
       <Pressable style={[StyleSheet.absoluteFill, { backgroundColor: t.overlay }]} onPress={onClose} />
       <View style={styles.sheetWrap} pointerEvents="box-none">
@@ -145,18 +154,37 @@ function DatePickerSheet({
           </View>
 
           <View style={styles.monthRow}>
-            {canPrev ? (
-              <Pressable onPress={() => shiftMonth(-1)} hitSlop={10} style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]} accessibilityLabel="Previous month">
+            {(picking ? minYear === null || view.y > minYear : canPrev) ? (
+              <Pressable
+                onPress={() => (picking ? setView((v) => ({ ...v, y: v.y - 1 })) : shiftMonth(-1))}
+                hitSlop={10}
+                style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]}
+                accessibilityLabel={picking ? "Previous year" : "Previous month"}
+              >
                 <ChevronLeft size={18} color={t.text} />
               </Pressable>
             ) : (
               <View style={styles.navBtn} />
             )}
-            <Txt size={15} weight="bold">
-              {MONTH_NAMES[view.m]} {view.y}
-            </Txt>
-            {canNext ? (
-              <Pressable onPress={() => shiftMonth(1)} hitSlop={10} style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]} accessibilityLabel="Next month">
+            <Pressable
+              onPress={() => setPicking((p) => !p)}
+              hitSlop={8}
+              style={styles.titleBtn}
+              accessibilityRole="button"
+              accessibilityLabel={picking ? "Back to days" : "Choose month and year"}
+            >
+              <Txt size={15} weight="bold">
+                {picking ? view.y : `${MONTH_NAMES[view.m]} ${view.y}`}
+              </Txt>
+              {picking ? <ChevronUp size={16} color={t.textMuted} /> : <ChevronDown size={16} color={t.textMuted} />}
+            </Pressable>
+            {(picking ? maxYear === null || view.y < maxYear : canNext) ? (
+              <Pressable
+                onPress={() => (picking ? setView((v) => ({ ...v, y: v.y + 1 })) : shiftMonth(1))}
+                hitSlop={10}
+                style={[styles.navBtn, { backgroundColor: t.surfaceAlt }]}
+                accessibilityLabel={picking ? "Next year" : "Next month"}
+              >
                 <ChevronRight size={18} color={t.text} />
               </Pressable>
             ) : (
@@ -164,6 +192,33 @@ function DatePickerSheet({
             )}
           </View>
 
+          {picking ? (
+            <View style={styles.monthGrid}>
+              {MONTH_NAMES.map((name, m) => {
+                const active = m === view.m;
+                const disabled = monthDisabled(m);
+                return (
+                  <Pressable
+                    key={name}
+                    disabled={disabled}
+                    onPress={() => {
+                      setView((v) => ({ ...v, m }));
+                      setPicking(false);
+                    }}
+                    style={[
+                      styles.monthCell,
+                      { borderColor: active ? t.primary : t.border, backgroundColor: active ? t.primary : "transparent" },
+                      disabled && { opacity: 0.3 },
+                    ]}
+                  >
+                    <Txt size={14} weight="semibold" color={active ? t.onPrimary : t.text}>
+                      {name.slice(0, 3)}
+                    </Txt>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : (
           <View style={styles.grid}>
             {WEEKDAYS.map((w, i) => (
               <View key={`w${i}`} style={styles.cell}>
@@ -200,6 +255,7 @@ function DatePickerSheet({
               );
             })}
           </View>
+          )}
 
           <Pressable onPress={() => onSelect(today)} disabled={outOfRange(today)} style={[styles.todayBtn, { borderColor: t.border }, outOfRange(today) && { opacity: 0.4 }]}>
             <Txt size={14} weight="semibold" color={t.primary}>
@@ -220,6 +276,9 @@ const styles = StyleSheet.create({
   sheetHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
   monthRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
   navBtn: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  titleBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6 },
+  monthGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 10, paddingVertical: 8 },
+  monthCell: { width: "31.5%", height: 48, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center" },
   grid: { flexDirection: "row", flexWrap: "wrap" },
   cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: "center", justifyContent: "center" },
   day: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },

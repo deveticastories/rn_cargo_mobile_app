@@ -16,6 +16,7 @@ import { fetchBookings } from "./slices/bookingsSlice";
 import { fetchContainers } from "./slices/containersSlice";
 import { fetchFinance } from "./slices/financeSlice";
 import { fetchMaster, saveMaster } from "./slices/mastersSlice";
+import { packageService } from "@/services/packageService";
 import type { RootState } from "./index";
 
 /* ------------------------------- Freshness ------------------------------- */
@@ -82,7 +83,10 @@ cacheListener.startListening({
   matcher: isAnyOf(fetchBookings.fulfilled, fetchContainers.fulfilled, fetchFinance.fulfilled, fetchMaster.fulfilled, saveMaster.fulfilled),
   effect: (action) => {
     if (fetchBookings.fulfilled.match(action)) loadedAt.set("bookings", Date.now());
-    else if (fetchContainers.fulfilled.match(action)) loadedAt.set("containers", Date.now());
+    else if (fetchContainers.fulfilled.match(action)) {
+      loadedAt.set("containers", Date.now());
+      packageService.clearCache();
+    }
     else if (fetchFinance.fulfilled.match(action)) loadedAt.set("finance", Date.now());
     else if (fetchMaster.fulfilled.match(action) || saveMaster.fulfilled.match(action)) loadedAt.set(`masters/${action.payload.key}`, Date.now());
   },

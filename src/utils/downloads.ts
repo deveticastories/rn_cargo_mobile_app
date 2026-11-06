@@ -110,6 +110,11 @@ function loadPdfFontCss(): Promise<string> {
   return pdfFontCss;
 }
 
+/** Starts loading the PDF fonts ahead of the first download. */
+export function prewarmPdfFonts() {
+  void loadPdfFontCss().catch(() => {});
+}
+
 async function withPdfFont(html: string): Promise<string> {
   const css = await loadPdfFontCss().catch(() => "");
   if (!css) return html;

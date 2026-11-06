@@ -3,7 +3,7 @@
  * receiver, transport, country and every other "pick one record" input.
  */
 import React, { useMemo, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Pressable, StyleSheet, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, ChevronDown, Search, X } from "lucide-react-native";
 import { fonts, radius } from "@/theme/fonts";
@@ -30,9 +30,13 @@ interface SelectFieldProps {
   emptyText?: string;
   /** Shown in red under the field, which also gets a red border. */
   error?: string | null;
+  /** Called when the sheet opens, e.g. to re-read its options from the server. */
+  onOpen?: () => void;
+  /** Options are being re-read: a spinner shows in the sheet. */
+  loading?: boolean;
 }
 
-export function SelectField({ label, placeholder = "Select", value, options, onChange, withAvatar, display, emptyText, error }: SelectFieldProps) {
+export function SelectField({ label, placeholder = "Select", value, options, onChange, withAvatar, display, emptyText, error, onOpen, loading }: SelectFieldProps) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => o.value === value);
@@ -45,7 +49,10 @@ export function SelectField({ label, placeholder = "Select", value, options, onC
         </Txt>
       )}
       <Pressable
-        onPress={() => setOpen(true)}
+        onPress={() => {
+          setOpen(true);
+          onOpen?.();
+        }}
         accessibilityRole="button"
         style={[styles.field, { borderColor: error ? t.tones.danger.fg : t.border, backgroundColor: t.isDark ? t.surfaceAlt : t.surface }]}
       >
@@ -67,6 +74,7 @@ export function SelectField({ label, placeholder = "Select", value, options, onC
         value={value}
         withAvatar={withAvatar}
         emptyText={emptyText}
+        loading={loading}
         onClose={() => setOpen(false)}
         onSelect={(v) => {
           onChange(v);
@@ -86,6 +94,7 @@ export function SelectSheet({
   onClose,
   withAvatar,
   emptyText = "Nothing to choose from yet.",
+  loading,
 }: {
   visible: boolean;
   title: string;
@@ -95,6 +104,7 @@ export function SelectSheet({
   onClose: () => void;
   withAvatar?: boolean;
   emptyText?: string;
+  loading?: boolean;
 }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -112,9 +122,12 @@ export function SelectSheet({
         <View style={[styles.sheet, { backgroundColor: t.surface, paddingBottom: insets.bottom + 12 }]}>
           <View style={[styles.grabber, { backgroundColor: t.borderStrong }]} />
           <View style={styles.sheetHeader}>
-            <Txt size={17} weight="bold">
-              {title}
-            </Txt>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <Txt size={17} weight="bold">
+                {title}
+              </Txt>
+              {loading && <ActivityIndicator size="small" color={t.primary} />}
+            </View>
             <Pressable onPress={onClose} hitSlop={10} accessibilityLabel="Close">
               <X size={20} color={t.textMuted} />
             </Pressable>
@@ -139,7 +152,7 @@ export function SelectSheet({
             style={{ maxHeight: 420 }}
             ListEmptyComponent={
               <Txt muted align="center" style={{ paddingVertical: 28 }}>
-                {emptyText}
+                {loading ? "Loading…" : emptyText}
               </Txt>
             }
             renderItem={({ item }) => {

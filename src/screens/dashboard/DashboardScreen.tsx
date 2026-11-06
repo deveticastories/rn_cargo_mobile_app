@@ -32,7 +32,7 @@ import { fetchBookings } from "@/store/slices/bookingsSlice";
 import { fetchContainers } from "@/store/slices/containersSlice";
 import { fetchFinance } from "@/store/slices/financeSlice";
 import { fetchMaster } from "@/store/slices/mastersSlice";
-import { pickupFullyCollected } from "@/features/masters/config";
+import { pickupCollectedCount, pickupFullyCollected, pickupStarted } from "@/features/masters/config";
 import { num, refField, str } from "@/services/mappers";
 import type { Tone } from "@/theme/palette";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -65,15 +65,17 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
 
   const load = useCallback(
     () =>
-      Promise.all([
-        dispatch(fetchBookings()),
-        dispatch(fetchContainers()),
-        dispatch(fetchFinance()),
-        dispatch(fetchMaster("team")),
-        dispatch(fetchMaster("customers")),
-        dispatch(fetchMaster("pickupAssigns")),
-      ]),
-    [dispatch]
+      pickupMode
+        ? Promise.all([dispatch(fetchMaster("pickupAssigns")), dispatch(fetchFinance())])
+        : Promise.all([
+            dispatch(fetchBookings()),
+            dispatch(fetchContainers()),
+            dispatch(fetchFinance()),
+            dispatch(fetchMaster("team")),
+            dispatch(fetchMaster("customers")),
+            dispatch(fetchMaster("pickupAssigns")),
+          ]),
+    [dispatch, pickupMode]
   );
   const { refreshing, onRefresh } = useRefresh(load);
   const scrollRef = useRef<ScrollView>(null);
@@ -88,8 +90,8 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
 
   const activePickups = pickups.filter((p) => p.status !== false);
   const fullyCollected = activePickups.filter(pickupFullyCollected).length;
-  const partiallyCollected = activePickups.filter((p) => p.pickupStatus === "Collected" && !pickupFullyCollected(p)).length;
-  const collectedBundles = activePickups.reduce((sum, p) => sum + (p.pickupStatus === "Collected" ? num(p.collectedBundle) : 0), 0);
+  const partiallyCollected = activePickups.filter((p) => pickupStarted(p) && !pickupFullyCollected(p)).length;
+  const collectedBundles = activePickups.reduce((sum, p) => sum + pickupCollectedCount(p), 0);
   // Newest first (Mongo ids start with their creation time).
   const recentPickups = [...activePickups].sort((a, b) => (b._id > a._id ? 1 : -1)).slice(0, 5);
   // Pickups not fully collected yet (pending or partial) light the bell.
@@ -316,10 +318,10 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
 function PickupRow({ pickup: p, last, onPress }: { pickup: BackendDoc; last?: boolean; onPress: () => void }) {
   const t = useTheme();
   const assigned = num(p.bundleCount);
-  const collected = p.pickupStatus === "Collected" ? num(p.collectedBundle) : 0;
+  const collected = pickupCollectedCount(p);
   const status = pickupFullyCollected(p)
     ? { label: "Fully collected", tone: "success" as const }
-    : p.pickupStatus === "Collected"
+    : pickupStarted(p)
       ? { label: "Partially collected", tone: "info" as const }
       : { label: "Pending", tone: "warning" as const };
   return (

@@ -6,6 +6,7 @@ import { useFonts } from "expo-font";
 import * as SplashScreen from "expo-splash-screen";
 import { store } from "@/store";
 import { AlertHost } from "@/components/AppAlert";
+import { ToastHost } from "@/components/AppToast";
 import { AnimatedSplash } from "@/components/AnimatedSplash";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { restoreSession } from "@/store/slices/authSlice";
@@ -41,6 +42,7 @@ function Bootstrap() {
     <View style={{ flex: 1 }}>
       <RootNavigator />
       <AlertHost />
+      <ToastHost />
       {!splashDone && <AnimatedSplash ready={restored} onFinish={finishSplash} />}
     </View>
   );

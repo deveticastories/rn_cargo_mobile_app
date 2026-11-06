@@ -1,4 +1,4 @@
-/** Expenses (More → Masters) — daily expenses with their cash / UPI split and the petty cash balance. */
+/** Expenses (More → Masters) — daily expenses with their cash / UPI split. */
 import React, { useCallback, useMemo, useState } from "react";
 import { KeyboardAvoidingView, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -12,7 +12,6 @@ import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import type { MoreScreenProps, RootScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { selectPettyCash } from "@/store/selectors";
 import { addExpense, fetchFinance } from "@/store/slices/financeSlice";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { PaymentType } from "@/types";
@@ -35,7 +34,6 @@ function ExpensesView({ onBack }: { onBack?: () => void }) {
   const t = useTheme();
   const dispatch = useAppDispatch();
   const { expenses, error } = useAppSelector((s) => s.finance);
-  const pettyCash = useAppSelector(selectPettyCash);
 
   const [monthOnly, setMonthOnly] = useState(true);
   const [showAll, setShowAll] = useState(false);
@@ -52,8 +50,8 @@ function ExpensesView({ onBack }: { onBack?: () => void }) {
   const spent = rows.reduce((s, e) => s + e.amount, 0);
   const cash = rows.filter((e) => e.paymentType === "Cash").reduce((s, e) => s + e.amount, 0);
   const tiles = [
-    { label: "Cash · UPI", value: `${money(cash)} · ${money(spent - cash)}`, positive: false },
-    { label: "Petty cash", value: money(pettyCash), positive: pettyCash >= 0 },
+    { label: "Cash", value: money(cash), positive: false },
+    { label: "UPI", value: money(spent - cash), positive: false },
   ];
 
   return (

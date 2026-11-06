@@ -70,6 +70,7 @@ export const api = axios.create({
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const method = (config.method ?? "get").toLowerCase();
   if (method !== "get") config.timeout = WRITE_TIMEOUT_MS;
+  else config.headers.set("Cache-Control", "no-cache");
   if (!config.skipAuth) {
     if (!isTokenValid(accessToken)) {
       notifySessionExpired();

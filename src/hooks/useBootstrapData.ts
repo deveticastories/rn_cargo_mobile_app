@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { useAppDispatch } from "@/store/hooks";
+import { InteractionManager } from "react-native";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { ensureBookings, ensureContainers, ensureFinance, ensureMaster } from "@/store/ensure";
+import { selectPickupMode } from "@/store/slices/authSlice";
+import { prewarmPdfFonts } from "@/utils/downloads";
 
 /**
  * Everything the tab screens summarise, loaded once after sign-in. Each list
@@ -8,15 +11,23 @@ import { ensureBookings, ensureContainers, ensureFinance, ensureMaster } from "@
  */
 export function useBootstrapData() {
   const dispatch = useAppDispatch();
+  const pickupMode = useAppSelector(selectPickupMode);
   useEffect(() => {
-    dispatch(ensureBookings());
-    dispatch(ensureContainers());
     dispatch(ensureFinance());
-    dispatch(ensureMaster("customers"));
+    dispatch(ensureMaster("team"));
     dispatch(ensureMaster("pickupAssigns"));
     dispatch(ensureMaster("pickupPartners"));
-    dispatch(ensureMaster("team"));
-  }, [dispatch]);
+    // The Pickup role's screens are pickups, pre-bookings and expenses only.
+    if (!pickupMode) {
+      dispatch(ensureBookings());
+      dispatch(ensureContainers());
+      dispatch(ensureMaster("customers"));
+    }
+    // PDFs are booking / finance work; get their fonts ready once the first screen has settled.
+    if (pickupMode) return;
+    const task = InteractionManager.runAfterInteractions(prewarmPdfFonts);
+    return () => task.cancel();
+  }, [dispatch, pickupMode]);
 }
 
 /** Pull-to-refresh helper: runs the given loads and tracks the spinner. */

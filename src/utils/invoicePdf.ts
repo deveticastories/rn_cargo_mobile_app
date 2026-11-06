@@ -21,19 +21,7 @@ export interface InvoiceExtras {
   productName?: (id: string) => string;
 }
 
-/** Packing lists already fetched this session — an invoiced booking's list no longer changes. */
-const packingLists = new Map<string, Promise<BookingPackingList | null>>();
-
-function packingListOf(bookingId: string) {
-  let list = packingLists.get(bookingId);
-  if (!list) {
-    list = packageService.getByBooking(bookingId);
-    packingLists.set(bookingId, list);
-    // A failed fetch is retried next time instead of being remembered.
-    list.catch(() => packingLists.delete(bookingId));
-  }
-  return list.catch(() => null);
-}
+const packingListOf = (bookingId: string): Promise<BookingPackingList | null> => packageService.getCached(bookingId).catch(() => null);
 
 /** "Shirt – 40 pcs" per product on the booking's packing list. */
 async function piecesOf(bookingId: string, productName?: (id: string) => string): Promise<string[]> {

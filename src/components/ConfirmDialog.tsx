@@ -3,6 +3,7 @@ import React from "react";
 import { Modal, Pressable, StyleSheet, View } from "react-native";
 import type { Tone } from "@/theme/palette";
 import { useTheme } from "@/theme/ThemeProvider";
+import { ToastHost } from "./AppToast";
 import { Button } from "./Button";
 import { IconTile } from "./primitives";
 import { Txt } from "./Txt";
@@ -26,6 +27,8 @@ interface ConfirmDialogProps {
   onCancel: () => void;
   /** Extra content between the message and the buttons, e.g. who is signed in. */
   children?: React.ReactNode;
+  /** Shows `showToast` banners above the dialog while it's open (e.g. form errors). */
+  toasts?: boolean;
 }
 
 export function ConfirmDialog({
@@ -41,6 +44,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   children,
+  toasts,
 }: ConfirmDialogProps) {
   const t = useTheme();
   const dismiss = () => {
@@ -74,6 +78,7 @@ export function ConfirmDialog({
           </View>
         </View>
       </View>
+      {toasts && <ToastHost inModal />}
     </Modal>
   );
 }

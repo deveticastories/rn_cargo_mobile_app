@@ -2,25 +2,26 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, TextInput, View } from "react-native";
 import { CheckCircle2, ChevronLeft, PackageCheck, Plus, Power, PowerOff, Search } from "lucide-react-native";
-import { showAlert, showError } from "@/components/AppAlert";
+import { showError } from "@/components/AppAlert";
+import { showErrorToast } from "@/components/AppToast";
 import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconButton, IconTile } from "@/components/primitives";
 import { EmptyView, LoadingView, Notice, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
 import { TextField } from "@/components/TextField";
-import { MASTERS, isActive, pickupFullyCollected, type MasterKey } from "@/features/masters/config";
+import { MASTERS, isActive, pickupCollectedCount, pickupFullyCollected, pickupStarted, type MasterKey } from "@/features/masters/config";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import { useNavigation, type NavigationProp } from "@react-navigation/native";
 import type { MoreScreenProps, RootStackParamList } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { deleteMaster, fetchMaster, recordPickupCollected, toggleMasterStatus } from "@/store/slices/mastersSlice";
+import { fetchMaster, recordPickupCollected, toggleMasterStatus } from "@/store/slices/mastersSlice";
 import { ensureMaster } from "@/store/ensure";
 import { fonts, radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { BackendDoc } from "@/types";
 import { num, refField, str } from "@/services/mappers";
-import { money } from "@/utils/format";
+import { money, shortDate } from "@/utils/format";
 
 export function MasterListScreen({ navigation, route }: MoreScreenProps<"MasterList">) {
   return <MasterListView masterKey={route.params.masterKey} onBack={() => navigation.goBack()} />;
@@ -52,7 +53,6 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
   // Pickup assigns: the pickup whose collected bundles are being recorded (web console's "Mark as collected").
   const [collecting, setCollecting] = useState<BackendDoc | null>(null);
   const [collected, setCollected] = useState("");
-  const [collectError, setCollectError] = useState<string | null>(null);
   const [collectBusy, setCollectBusy] = useState(false);
 
   useEffect(() => {
@@ -60,7 +60,10 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
     def.dependsOn?.forEach((k) => dispatch(ensureMaster(k)));
   }, [dispatch, def]);
 
-  const load = useCallback(() => dispatch(fetchMaster(def.key)), [dispatch, def.key]);
+  const load = useCallback(
+    () => Promise.all([dispatch(fetchMaster(def.key)), ...(def.dependsOn ?? []).map((k) => dispatch(fetchMaster(k)))]),
+    [dispatch, def]
+  );
   const { refreshing, onRefresh } = useRefresh(load);
 
   const items = useMemo(() => {
@@ -83,33 +86,19 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
   const openCollect = (doc: BackendDoc) => {
     if (pickupFullyCollected(doc)) return;
     setCollecting(doc);
-    setCollected(doc.pickupStatus === "Collected" && doc.collectedBundle ? String(doc.collectedBundle) : "");
-    setCollectError(null);
+    setCollected(pickupCollectedCount(doc) ? String(pickupCollectedCount(doc)) : "");
   };
   const assigned = Number(collecting?.bundleCount ?? 0);
   const submitCollect = async () => {
     if (!collecting) return;
     const n = Number(collected);
-    if (!collected || !(n > 0)) return setCollectError("Enter how many bundles were collected.");
-    if (n > assigned) return setCollectError(`Collected bundle can't be more than the ${assigned} bundles assigned.`);
+    if (!collected || !(n > 0)) return showErrorToast("Can't save", "Enter how many bundles were collected.");
+    if (n > assigned) return showErrorToast("Can't save", `Collected bundle can't be more than the ${assigned} bundles assigned.`);
     setCollectBusy(true);
     const res = await dispatch(recordPickupCollected({ id: collecting._id, collectedBundle: n }));
     setCollectBusy(false);
-    if (recordPickupCollected.rejected.match(res)) setCollectError(res.payload ?? "Failed to save.");
+    if (recordPickupCollected.rejected.match(res)) showErrorToast("Couldn't save the collected bundles", res.payload ?? "Please try again.");
     else setCollecting(null);
-  };
-
-  const onDelete = (doc: BackendDoc) => {
-    if (def.canDelete && !def.canDelete(doc)) return showAlert(`Can't delete this ${def.singular}`, "Collected pickups can't be deleted.");
-    showAlert(`Delete ${def.singular}?`, `${def.primary(doc)} will be removed permanently.`, {
-      confirmLabel: "Delete",
-      cancelLabel: "Cancel",
-      destructive: true,
-      onConfirm: async () => {
-        const res = await dispatch(deleteMaster({ key: def.key, id: doc._id }));
-        if (deleteMaster.rejected.match(res)) showError("Couldn't delete", res.payload ?? "Please try again.");
-      },
-    });
   };
 
   return (
@@ -155,7 +144,6 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
                   doc={item}
                   busy={mutatingId === item._id}
                   onEdit={() => navigation.navigate("MasterForm", { masterKey: def.key, id: item._id })}
-                  onDelete={() => onDelete(item)}
                   onCollect={() => openCollect(item)}
                   onToggleStatus={() => setToggling(item)}
                 />
@@ -165,7 +153,6 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
             return (
               <Card
                 onPress={() => navigation.navigate("MasterForm", { masterKey: def.key, id: item._id })}
-                onLongPress={() => onDelete(item)}
                 style={[styles.row, mutatingId === item._id && { opacity: 0.5 }]}
               >
                 <IconTile icon={def.icon} tone={def.tone} size={40} />
@@ -190,9 +177,6 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
           }}
         />
       )}
-      <Txt size={11.5} soft align="center" style={{ paddingBottom: 10 }}>
-        Tap to edit · long-press to delete{def.hasStatus ? " · tap status to toggle" : ""}
-      </Txt>
 
       <ConfirmDialog
         visible={toggling !== null}
@@ -215,7 +199,7 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
         icon={PackageCheck}
         tone="success"
         title={
-          collecting?.pickupStatus === "Collected"
+          collecting && pickupStarted(collecting)
             ? `Edit collected bundle — LR ${String(collecting?.lrNo ?? "")}`
             : `Mark LR ${String(collecting?.lrNo ?? "")} as collected`
         }
@@ -223,6 +207,7 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
         loading={collectBusy}
         onConfirm={submitCollect}
         onCancel={() => setCollecting(null)}
+        toasts
       >
         <View style={{ alignSelf: "stretch" }}>
           <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
@@ -233,7 +218,6 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
                 onChangeText={(v) => setCollected(v.replace(/\D/g, ""))}
                 keyboardType="number-pad"
                 placeholder="0"
-                error={collectError}
               />
             </View>
             {/* Most pickups collect everything — one tap fills the assigned count. */}
@@ -256,26 +240,28 @@ function PickupAssignRow({
   doc,
   busy,
   onEdit,
-  onDelete,
   onCollect,
   onToggleStatus,
 }: {
   doc: BackendDoc;
   busy: boolean;
   onEdit: () => void;
-  onDelete: () => void;
   onCollect: () => void;
   onToggleStatus: () => void;
 }) {
   const t = useTheme();
   const assigned = num(doc.bundleCount);
-  const collected = doc.pickupStatus === "Collected" ? num(doc.collectedBundle) : 0;
+  const collected = pickupCollectedCount(doc);
   const balance = Math.max(0, assigned - collected);
   const done = pickupFullyCollected(doc);
-  const pending = doc.pickupStatus !== "Collected";
+  const pending = !pickupStarted(doc);
   const paid = doc.paymentStatus === "Paid";
+  // Extra details from GET /pickup-assigns, shown only when the server sends them.
+  const phone = str(refField(doc.transport, "whatsapp")) || str(refField(doc.transport, "phone"));
+  const date = str(doc.date || doc.createdAt);
+  const details = [date && shortDate(date), phone].filter(Boolean).join(" · ");
   return (
-    <Card onPress={onEdit} onLongPress={onDelete} style={[{ marginBottom: 12 }, busy && { opacity: 0.5 }]}>
+    <Card onPress={onEdit} style={[{ marginBottom: 12 }, busy && { opacity: 0.5 }]}>
       <View style={styles.pickupTop}>
         <IconTile icon={MASTERS.pickupAssigns.icon} tone="info" size={40} />
         <View style={{ flex: 1, marginHorizontal: 12 }}>
@@ -283,11 +269,20 @@ function PickupAssignRow({
             <Txt size={15} weight="bold" numberOfLines={1} style={{ flexShrink: 1 }}>
               LR {str(doc.lrNo) || "—"}
             </Txt>
-            <Badge label={pending ? "Pending" : "Collected"} tone={pending ? "warning" : "success"} size="sm" />
+            <Badge
+              label={pending ? "Pending" : done ? "Collected" : "Partially collected"}
+              tone={pending ? "warning" : done ? "success" : "info"}
+              size="sm"
+            />
           </View>
           <Txt size={12.5} muted numberOfLines={1} style={{ marginTop: 2 }}>
             {[str(refField(doc.transport, "name")), money(num(doc.amount))].filter(Boolean).join(" · ")}
           </Txt>
+          {details ? (
+            <Txt size={12} muted numberOfLines={1} style={{ marginTop: 2 }}>
+              {details}
+            </Txt>
+          ) : null}
         </View>
         <View style={{ alignItems: "flex-end", gap: 6 }}>
           <Badge label={paid ? "Paid" : "Unpaid"} tone={paid ? "success" : "danger"} size="sm" />
@@ -299,8 +294,8 @@ function PickupAssignRow({
 
       <View style={[styles.pickupStats, { borderColor: t.border }]}>
         <PickupStat label="Bundles" value={String(assigned)} />
-        <PickupStat label="Collected" value={pending ? "—" : String(collected)} tone={pending ? undefined : t.tones.success.fg} />
-        <PickupStat label="Balance" value={pending ? "—" : String(balance)} tone={!pending && balance > 0 ? t.tones.warning.fg : undefined} />
+        <PickupStat label="Collected" value={String(collected)} tone={collected > 0 ? t.tones.success.fg : undefined} />
+        <PickupStat label="Balance" value={String(balance)} tone={balance > 0 ? t.tones.warning.fg : undefined} />
       </View>
 
       {done ? (

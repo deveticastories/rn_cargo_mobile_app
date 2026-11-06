@@ -6,7 +6,7 @@
 import { createSlice } from "@reduxjs/toolkit";
 import { api, errorMessage } from "@/api/client";
 import { API_ENDPOINTS } from "@/api/endpoints";
-import { MASTERS, docToFormValues, formValuesToPayload, statusPayload, type MasterKey } from "@/features/masters/config";
+import { MASTERS, docToFormValues, formValuesToPayload, pickupStatusFor, statusPayload, type MasterKey } from "@/features/masters/config";
 import { masterService } from "@/services/masterService";
 import { nextSequentialCode } from "@/services/mappers";
 import type { BackendDoc, LoadStatus } from "@/types";
@@ -36,6 +36,18 @@ export const fetchMaster = createAppAsyncThunk("masters/fetch", async (key: Mast
   }
 });
 
+/** Re-reads one record (GET endpoint/:id) and puts it in the list. */
+export const fetchMasterItem = createAppAsyncThunk(
+  "masters/fetchItem",
+  async (args: { key: MasterKey; id: string }, { rejectWithValue }) => {
+    try {
+      return { key: args.key, doc: await masterService.get(MASTERS[args.key], args.id) };
+    } catch (err) {
+      return rejectWithValue(errorMessage(err, `Couldn't load the ${MASTERS[args.key].singular}.`));
+    }
+  }
+);
+
 /** Create (no `id`) or update a record from form values, then re-read the list so refs come back populated. */
 export const saveMaster = createAppAsyncThunk(
   "masters/save",
@@ -43,7 +55,7 @@ export const saveMaster = createAppAsyncThunk(
     const def = MASTERS[args.key];
     try {
       const doc = args.id ? getState().masters[args.key].items.find((d) => d._id === args.id) : undefined;
-      const payload = formValuesToPayload(def, args.values, { isEdit: Boolean(args.id), initial: docToFormValues(def, doc) });
+      const payload = formValuesToPayload(def, args.values, { isEdit: Boolean(args.id), initial: docToFormValues(def, doc), doc });
       if (args.id) {
         await masterService.update(def, args.id, payload);
       } else {
@@ -78,10 +90,14 @@ export const toggleMasterStatus = createAppAsyncThunk(
 /** Records a pickup's collected bundles through cargo-backend's dedicated endpoint, then re-reads the list. */
 export const recordPickupCollected = createAppAsyncThunk(
   "masters/pickupCollected",
-  async (args: { id: string; collectedBundle: number }, { rejectWithValue }) => {
+  async (args: { id: string; collectedBundle: number }, { getState, rejectWithValue }) => {
     const def = MASTERS.pickupAssigns;
+    const assigned = Number(getState().masters.pickupAssigns.items.find((d) => d._id === args.id)?.bundleCount ?? 0);
     try {
-      await api.patch(API_ENDPOINTS.PICKUP_ASSIGNS.COLLECTED(args.id), { pickupStatus: "Collected", collectedBundle: args.collectedBundle });
+      await api.patch(API_ENDPOINTS.PICKUP_ASSIGNS.COLLECTED(args.id), {
+        pickupStatus: pickupStatusFor(args.collectedBundle, assigned),
+        collectedBundle: args.collectedBundle,
+      });
       return { key: def.key, items: await masterService.list(def) };
     } catch (err) {
       return rejectWithValue(errorMessage(err, "Couldn't save the collected bundles."));
@@ -125,6 +141,20 @@ const mastersSlice = createSlice({
       .addCase(fetchMaster.rejected, (state, { meta, payload }) => {
         state[meta.arg].status = "failed";
         state[meta.arg].error = payload ?? "Couldn't load.";
+      })
+      .addCase(fetchMasterItem.fulfilled, (state, { payload }) => {
+        const fresh = payload.doc;
+        if (!fresh) return;
+        const items = state[payload.key].items;
+        const i = items.findIndex((d) => d._id === fresh._id);
+        if (i < 0) return void items.push(fresh);
+        // The single read may return refs as bare ids; keep the list's populated ones for those.
+        const merged: BackendDoc = { ...items[i], ...fresh };
+        for (const [k, v] of Object.entries(items[i])) {
+          const old = v as { _id?: unknown } | null;
+          if (typeof fresh[k] === "string" && old && typeof old === "object" && old._id === fresh[k]) merged[k] = v;
+        }
+        items[i] = merged;
       })
       .addCase(saveMaster.fulfilled, (state, { payload }) => {
         state[payload.key].items = payload.items;

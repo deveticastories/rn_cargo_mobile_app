@@ -39,7 +39,7 @@ export function InvoicesScreen() {
   const t = useTheme();
   const dispatch = useAppDispatch();
   const bookings = useAppSelector((s) => s.bookings.items);
-  const { items: containers, stuffings } = useAppSelector((s) => s.containers);
+  const { items: containers, stuffings, error: containersError } = useAppSelector((s) => s.containers);
   const invoices = useAppSelector((s) => s.finance.invoices);
   const financeError = useAppSelector((s) => s.finance.error);
   const pricing = useAppSelector((s) => s.masters.pricing.items);
@@ -89,6 +89,8 @@ export function InvoicesScreen() {
   const { refreshing, onRefresh } = useRefresh(reload);
   const navigation = useNavigation();
   useEffect(() => navigation.addListener("blur", resetForm), [navigation, resetForm]);
+  // Opening the tab reads containers, bookings and invoices again, so newly stuffed containers show up.
+  useEffect(() => navigation.addListener("focus", () => void load()), [navigation, load]);
   const scrollRef = useRef<ScrollView>(null);
   useTabScrollReset(scrollRef);
 
@@ -143,30 +145,6 @@ export function InvoicesScreen() {
             : needsCharge
               ? `Add ${str(partner?.name) || "the delivery partner"}'s charge below before generating the invoice.`
               : "";
-
-  // TEMP debug: the current selection and the figures the form shows.
-  useEffect(() => {
-    console.log("[Invoices] selection", JSON.stringify({
-      container: container ?? null,
-      booking: booking ?? null,
-      invoice: invoice ?? null,
-      deliveryPartner: partner ?? null,
-      route: route ?? null,
-      figures: {
-        rate,
-        qty,
-        subtotal,
-        pickupCharge: booking?.pickupCharge,
-        brandHandlingCharge: booking?.brandHandlingCharge,
-        bundleHandlingCharge: booking?.bundleHandlingCharge,
-        additional,
-        discount,
-        deliveryCharge,
-        total: invoice?.amount ?? subtotal + additional - discount + (deliveryCharge ?? 0),
-      },
-      problem,
-    }, null, 2));
-  }, [container, booking, invoice, partner, route, rate, qty, subtotal, additional, discount, deliveryCharge, problem]);
 
   const receiverParty = (b?: Booking) => ({
     name: b?.receiver.name ?? "",
@@ -253,6 +231,7 @@ export function InvoicesScreen() {
           keyboardShouldPersistTaps="handled"
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
         >
+          {containersError && <Notice message={containersError} onRetry={() => dispatch(fetchContainers())} />}
           {financeError && <Notice message={financeError} onRetry={() => dispatch(fetchFinance())} />}
 
           <Card>
@@ -267,6 +246,8 @@ export function InvoicesScreen() {
               label="Container"
               placeholder="Choose a container"
               value={containerId}
+              // Opening the picker reads containers again, so new ones show without a refresh.
+              onOpen={() => dispatch(fetchContainers())}
               options={stuffedContainers.map((c) => ({ value: c.id, label: c.code, sublabel: c.company }))}
               onChange={(v) => {
                 setContainerId(v);

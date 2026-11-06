@@ -126,10 +126,10 @@ const authSlice = createSlice({
 });
 
 /**
- * Finance users ("Fin" role) work on invoices, delivery notes and receipts
+ * Finance-mode users ("Transit" role) work on invoices, delivery notes and receipts
  * instead of bookings and stuffing.
  */
-export const isFinanceRole = (role?: unknown) => /^fin/i.test(roleName(role));
+export const isFinanceRole = (role?: unknown) => /^transit$/i.test(roleName(role).trim());
 export const selectFinanceMode = (s: { auth: AuthState }) => isFinanceRole(s.auth.user?.role);
 
 /** "Super Admin" (any case / spacing) — the only role that sees Reports and Finance under More. */

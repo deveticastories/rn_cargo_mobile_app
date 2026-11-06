@@ -3,18 +3,17 @@ import React, { useRef, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Constants from "expo-constants";
-import { ArrowLeftRight, ChartColumn, ChevronRight, FileBarChart, LogOut, ReceiptText, Repeat, Ship, Wallet } from "lucide-react-native";
+import { ChartColumn, ChevronRight, FileBarChart, LogOut, ReceiptText, Ship, Wallet } from "lucide-react-native";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconTile, SectionTitle } from "@/components/primitives";
 import { LargeHeader, Screen } from "@/components/Screen";
 import { Segmented } from "@/components/Segmented";
 import { Txt } from "@/components/Txt";
-import { MASTERS, MASTER_GRID } from "@/features/masters/config";
+import { MASTERS, MASTER_GRID, pickupFullyCollected } from "@/features/masters/config";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useTabScrollReset } from "@/hooks/useTabScrollReset";
 import type { MoreScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { selectBookingStats } from "@/store/selectors";
 import { logout, selectFinanceMode, selectSuperAdmin } from "@/store/slices/authSlice";
 import { setThemePreference } from "@/store/slices/uiSlice";
 import type { Tone } from "@/theme/palette";
@@ -30,11 +29,12 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
   const { name, email, role } = useCurrentUser();
   const themePreference = useAppSelector((s) => s.ui.themePreference);
   const financeMode = useAppSelector(selectFinanceMode);
+  // Masters tiles: finance mode has Expenses, Containers and Receipts; others every master plus Expenses and Containers.
+  const gridTiles = financeMode ? 3 : MASTER_GRID.length + 2;
   const superAdmin = useAppSelector(selectSuperAdmin);
   const pendingPickups = useAppSelector(
-    (s) => s.masters.pickupAssigns.items.filter((a) => a.pickupStatus !== "Collected" && a.status !== false).length
+    (s) => s.masters.pickupAssigns.items.filter((a) => !pickupFullyCollected(a) && a.status !== false).length
   );
-  const repacking = useAppSelector(selectBookingStats).counts.repacking;
   const version = Constants.expoConfig?.version ?? "1.0.0";
   const scrollRef = useRef<ScrollView>(null);
   useTabScrollReset(scrollRef);
@@ -68,7 +68,7 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
 
         {/* Masters (finance users only need Expenses and stuffed Containers) */}
         <SectionTitle title="Masters" />
-        <View style={[styles.grid, financeMode && { justifyContent: "flex-start", columnGap: 10 }]}>
+        <View style={styles.grid}>
           {!financeMode &&
             MASTER_GRID.map((key) => {
               const def = MASTERS[key];
@@ -113,8 +113,9 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
             </Card>
           )}
           {/* Empty slots fill the last row so its tiles stay in their columns. */}
-          {!financeMode &&
-            Array.from({ length: (3 - ((MASTER_GRID.length + 2) % 3)) % 3 }, (_, i) => <View key={`gap${i}`} style={styles.gridGap} />)}
+          {Array.from({ length: (3 - (gridTiles % 3)) % 3 }, (_, i) => (
+            <View key={`gap${i}`} style={styles.gridGap} />
+          ))}
         </View>
 
         {/* Operations (booking work — hidden in finance mode) */}
@@ -134,19 +135,6 @@ export function MoreScreen({ navigation }: MoreScreenProps<"MoreHome">) {
                 tone="purple"
                 label="Pre-booking"
                 onPress={() => navigation.navigate("MasterList", { masterKey: "preBookings" })}
-              />
-              <OpRow
-                icon={Repeat}
-                tone="warning"
-                label="Repacking"
-                count={repacking}
-                onPress={() => navigation.navigate("Bookings", { filter: "packingList" })}
-              />
-              <OpRow
-                icon={ArrowLeftRight}
-                tone="success"
-                label="Ready to stuff"
-                onPress={() => navigation.navigate("Bookings", { filter: "readyToStuff" })}
                 last
               />
             </Card>

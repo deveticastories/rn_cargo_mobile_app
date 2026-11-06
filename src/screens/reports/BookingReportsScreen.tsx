@@ -1,6 +1,6 @@
 /**
- * Reports: pick a month and year, narrow it with From / To inside that
- * month, and see the stuffed bookings grouped container-wise, customer-wise (sender)
+ * Reports: pick a From / To range (the calendar jumps by month and year),
+ * and see the stuffed bookings grouped container-wise, customer-wise (sender)
  * or country-wise (receiver's country) — with a PDF of the same view.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
@@ -11,7 +11,6 @@ import { DatePickerField } from "@/components/DatePickerField";
 import { Avatar, Badge, Card, IconButton, Stat } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
 import { Segmented } from "@/components/Segmented";
-import { SelectField } from "@/components/SelectSheet";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
@@ -31,9 +30,6 @@ import { useStuffedData, type StuffedBooking } from "@/screens/stuffedContainers
 type GroupBy = "container" | "customer" | "country" | "partner";
 const GROUPS = ["container", "country", "customer", "partner"] as const;
 const GROUP_LABELS = { container: "Container", customer: "Customer", country: "Country", partner: "Delivery Partner" } as const;
-/** Reports can go back to this year even before any bookings are loaded. */
-const FIRST_YEAR = 2024;
-const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const monthStart = (y: number, m: number) => `${y}-${pad(m + 1)}-01`;
@@ -76,13 +72,12 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
   const { bookingRow } = useStuffedData();
 
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth());
   const [from, setFrom] = useState(monthStart(now.getFullYear(), now.getMonth()));
   const [to, setTo] = useState(monthEnd(now.getFullYear(), now.getMonth()));
   const [groupBy, setGroupBy] = useState<GroupBy>("container");
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
+  // The group whose PDF is being made.
+  const [downloading, setDownloading] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(ensureBookings());
@@ -94,29 +89,6 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
 
   const load = useCallback(() => Promise.all([dispatch(fetchBookings()), dispatch(fetchContainers()), dispatch(fetchFinance())]), [dispatch]);
   const { refreshing, onRefresh } = useRefresh(load);
-
-  // Choosing a month or year resets From / To to the whole month.
-  const pickMonth = (y: number, m: number) => {
-    setYear(y);
-    setMonth(m);
-    setFrom(monthStart(y, m));
-    setTo(monthEnd(y, m));
-    setOpenKey(null);
-  };
-
-  // Every year from 2024 to the current one, plus any other year with bookings.
-  const yearOptions = useMemo(() => {
-    const years = new Set<number>();
-    for (let y = FIRST_YEAR; y <= now.getFullYear(); y++) years.add(y);
-    for (const b of bookings) {
-      const d = parseDate(b.date);
-      if (d) years.add(d.getFullYear());
-    }
-    return [...years].sort((a, b) => b - a).map((y) => ({ value: String(y), label: String(y) }));
-    // The current year only changes at midnight on 31 Dec.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookings]);
-  const monthOptions = MONTH_NAMES.map((name, i) => ({ value: String(i), label: name }));
 
   const containerOf = useMemo(() => {
     const map = new Map<string, { id: string; label: string; sublabel: string }>();
@@ -187,55 +159,46 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
   }, [rows, groupBy, containerOf, lookup]);
 
   const totalBundles = rows.reduce((n, r) => n + r.bundles, 0);
-  const totalPayable = rows.reduce((n, r) => n + r.payable, 0);
   const totalReceivable = rows.reduce((n, r) => n + r.receivable, 0);
   const rangeLabel = `${fullDate(from)} – ${fullDate(to)}`;
 
-  const downloadPdf = async () => {
-    if (rows.length === 0) return;
-    setDownloading(true);
+  /** One group's PDF: its bookings in the chosen dates. */
+  const downloadGroupPdf = async (g: ReportGroup) => {
+    if (downloading) return;
+    setDownloading(g.key);
     try {
       const label = GROUP_LABELS[groupBy];
-      await downloadTablePdf(`booking-report-${groupBy}-${from}-to-${to}.pdf`, {
+      const slug = g.label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "group";
+      await downloadTablePdf(`booking-report-${groupBy}-${slug}-${from}-to-${to}.pdf`, {
         title: `${label.toUpperCase()} WISE BOOKING REPORT`,
         landscape: true,
         info: [
+          [label, [g.label, g.sublabel].filter(Boolean).join(" · ")],
           ["Period", rangeLabel],
-          ["No. of Bookings", String(rows.length)],
-          ["No. of Bundles", String(totalBundles)],
+          ["No. of Bookings", String(g.rows.length)],
+          ["No. of Bundles", String(g.bundles)],
           ["Generated On", fullDate(new Date().toISOString())],
         ],
-        head: ["Sl No", label, "Bookings", "Bundles", "Delivery Partner Payable", "Total Receivable"],
-        body: groups.map((g, i) => [String(i + 1), [g.label, g.sublabel].filter(Boolean).join(" · "), String(g.rows.length), String(g.bundles), money(g.payable), money(g.receivable)]),
-        foot: ["", "Total", String(rows.length), String(totalBundles), money(totalPayable), money(totalReceivable)],
-        sections: [
-          {
-            heading: "Booking details",
-            head: ["Sl No", label, "Booking ID", "Receiver Details", "Bundle Mark", "Bundle Count", "Delivery Partner", "Delivery Partner Payable Amount", "Total Receivable Amount"],
-            body: groups.flatMap((g) =>
-              g.rows.map((r, i) => [
-                String(rows.indexOf(r) + 1),
-                i === 0 ? g.label : "",
-                r.booking.code,
-                (() => {
-                  const rc = receiverOf(r);
-                  return [rc.name, rc.location, rc.contact].filter(Boolean).join(", ") || "-";
-                })(),
-                r.item.bundleMarks || "-",
-                String(r.bundles),
-                r.partner || "-",
-                r.item.invoice ? money(r.payable) : "-",
-                r.item.invoice ? money(r.receivable) : "-",
-              ])
-            ),
-            foot: ["", "", "", "", "Total", String(totalBundles), "", money(totalPayable), money(totalReceivable)],
-          },
-        ],
+        head: ["Sl No", "Booking ID", "Receiver Details", "Bundle Mark", "Bundle Count", "Delivery Partner", "Delivery Partner Payable Amount", "Total Receivable Amount"],
+        body: g.rows.map((r, i) => {
+          const rc = receiverOf(r);
+          return [
+            String(i + 1),
+            r.booking.code,
+            [rc.name, rc.location, rc.contact].filter(Boolean).join(", ") || "-",
+            r.item.bundleMarks || "-",
+            String(r.bundles),
+            r.partner || "-",
+            r.item.invoice ? money(r.payable) : "-",
+            r.item.invoice ? money(r.receivable) : "-",
+          ];
+        }),
+        foot: ["", "", "", "Total", String(g.bundles), "", money(g.payable), money(g.receivable)],
       });
     } catch (e) {
       showError("Couldn't create the PDF", e instanceof Error ? e.message : "Please try again.");
     } finally {
-      setDownloading(false);
+      setDownloading(null);
     }
   };
 
@@ -244,13 +207,6 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
       <NavHeader
         left={<IconButton icon={ChevronLeft} onPress={() => navigation.goBack()} accessibilityLabel="Back" />}
         title="Reports"
-        right={
-          downloading ? (
-            <ActivityIndicator color={t.primary} style={{ width: 40 }} />
-          ) : rows.length > 0 ? (
-            <IconButton icon={Download} onPress={downloadPdf} accessibilityLabel="Download report PDF" />
-          ) : null
-        }
       />
       <ScrollView
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
@@ -258,19 +214,10 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.pair}>
-          <View style={{ flex: 1.4 }}>
-            <SelectField label="Month" value={String(month)} options={monthOptions} onChange={(v) => pickMonth(year, Number(v))} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <SelectField label="Year" value={String(year)} options={yearOptions} onChange={(v) => pickMonth(Number(v), month)} />
-          </View>
-        </View>
-        <View style={styles.pair}>
           <View style={{ flex: 1 }}>
             <DatePickerField
               label="From"
               value={from}
-              minDate={monthStart(year, month)}
               maxDate={to}
               onChange={(v) => {
                 setFrom(v);
@@ -283,7 +230,6 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
               label="To"
               value={to}
               minDate={from}
-              maxDate={monthEnd(year, month)}
               onChange={(v) => {
                 setTo(v);
                 setOpenKey(null);
@@ -319,7 +265,14 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
           <EmptyView title="No stuffed bookings" message="No bookings made in the selected dates have been stuffed yet." />
         ) : (
           groups.map((g) => (
-            <GroupCard key={g.key} group={g} open={openKey === g.key} onToggle={() => setOpenKey(openKey === g.key ? null : g.key)} />
+            <GroupCard
+              key={g.key}
+              group={g}
+              open={openKey === g.key}
+              onToggle={() => setOpenKey(openKey === g.key ? null : g.key)}
+              downloading={downloading === g.key}
+              onDownload={() => downloadGroupPdf(g)}
+            />
           ))
         )}
       </ScrollView>
@@ -333,7 +286,19 @@ function receiverOf(r: ReportRow) {
   return { name: rc.name || r.booking.receiver.name, location: rc.lines[0] ?? "", contact: rc.contact !== "—" ? rc.contact : "" };
 }
 
-function GroupCard({ group, open, onToggle }: { group: ReportGroup; open: boolean; onToggle: () => void }) {
+function GroupCard({
+  group,
+  open,
+  onToggle,
+  downloading,
+  onDownload,
+}: {
+  group: ReportGroup;
+  open: boolean;
+  onToggle: () => void;
+  downloading: boolean;
+  onDownload: () => void;
+}) {
   const t = useTheme();
   return (
     <Card style={{ marginBottom: 12 }} padded={false}>
@@ -353,6 +318,11 @@ function GroupCard({ group, open, onToggle }: { group: ReportGroup; open: boolea
             <Badge label={money(group.receivable)} tone="success" size="sm" dot={false} />
           </View>
         </View>
+        {downloading ? (
+          <ActivityIndicator color={t.primary} style={{ width: 36 }} />
+        ) : (
+          <IconButton icon={Download} size={36} onPress={onDownload} accessibilityLabel={`Download ${group.label} PDF`} />
+        )}
         {open ? <ChevronDown size={18} color={t.textMuted} /> : <ChevronRight size={18} color={t.textMuted} />}
       </Pressable>
       {open && (

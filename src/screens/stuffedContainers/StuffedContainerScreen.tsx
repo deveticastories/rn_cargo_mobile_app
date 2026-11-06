@@ -4,18 +4,23 @@
  * partner amount and payment status ("CONTAINER BOOKING LIST" PDF). Tap a
  * booking for its charges ("BOOKING CHARGES" PDF) and bundles ("BUNDLE DETAILS" PDF).
  */
-import React, { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { ChevronDown, ChevronLeft, ChevronRight, Download } from "lucide-react-native";
 import { showError } from "@/components/AppAlert";
 import { Badge, Card, DashedDivider, IconButton, Stat } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
+import { useRefresh } from "@/hooks/useBootstrapData";
 import type { MoreScreenProps } from "@/navigation/types";
 import { str } from "@/services/mappers";
 import { packageService, type BookingPackingList } from "@/services/packageService";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { ensureMaster } from "@/store/ensure";
+import { fetchBookings } from "@/store/slices/bookingsSlice";
+import { fetchContainers } from "@/store/slices/containersSlice";
+import { fetchFinance } from "@/store/slices/financeSlice";
+import { fetchMaster } from "@/store/slices/mastersSlice";
 import { useTheme } from "@/theme/ThemeProvider";
 import { fullDate, money } from "@/utils/format";
 import { downloadTablePdf } from "@/utils/tablePdf";
@@ -40,6 +45,20 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
     dispatch(ensureMaster("products"));
     dispatch(ensureMaster("fabrics"));
   }, [dispatch]);
+  // Bumped on refresh so each booking card reloads its packing list.
+  const [version, setVersion] = useState(0);
+  const load = useCallback(
+    () =>
+      Promise.all([
+        dispatch(fetchContainers()),
+        dispatch(fetchBookings()),
+        dispatch(fetchFinance()),
+        dispatch(fetchMaster("products")),
+        dispatch(fetchMaster("fabrics")),
+      ]).then(() => setVersion((v) => v + 1)),
+    [dispatch]
+  );
+  const { refreshing, onRefresh } = useRefresh(load);
 
   const bookings = useMemo(() => (row ? row.bookingIds.map(bookingRow) : []), [row, bookingRow]);
   const back = <IconButton icon={ChevronLeft} onPress={() => navigation.goBack()} accessibilityLabel="Back" />;
@@ -87,7 +106,10 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
           )
         }
       />
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 30 }}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 30 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
+      >
         <Card style={{ marginBottom: 14 }}>
           <Txt size={15} weight="bold">
             {row.containerName}
@@ -104,7 +126,7 @@ export function StuffedContainerScreen({ navigation, route }: MoreScreenProps<"S
         ) : (
           bookings.map((b, i) => (
             <StuffedBookingCard
-              key={b.id}
+              key={`${b.id}-${version}`}
               slNo={i + 1}
               item={b}
               row={row}

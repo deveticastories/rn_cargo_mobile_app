@@ -70,7 +70,7 @@ export function DeliveryNotesScreen() {
 
   const loadRows = useCallback(
     async (id: string): Promise<NoteRow[]> => {
-      const list = await packageService.getByBooking(id).catch(() => null);
+      const list = await packageService.getCached(id).catch(() => null);
       return (list?.bundles ?? []).flatMap((b) =>
         b.lines.map((l) => ({
           bundleNo: String(b.bundleNo),

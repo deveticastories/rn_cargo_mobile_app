@@ -9,7 +9,7 @@ export type BookingFilter = "all" | BookingListTab;
 
 export type MoreStackParamList = {
   MoreHome: undefined;
-  Finance: { tab?: "invoices" | "receipts" } | undefined;
+  Finance: { tab?: "invoices" | "receipts" | "funds" } | undefined;
   /** Daily expenses (More → Masters). */
   Expenses: undefined;
   /** Bookings in a month / date range, grouped container-, customer- or country-wise. */

@@ -4,6 +4,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from "re
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, Trash2, Wallet, X } from "lucide-react-native";
 import { showAlert } from "@/components/AppAlert";
+import { showErrorToast } from "@/components/AppToast";
 import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Chip, IconButton } from "@/components/primitives";
@@ -16,7 +17,8 @@ import { MASTERS, docToFormValues, validateForm, type FieldDef, type FormContext
 import type { RootScreenProps } from "@/navigation/types";
 import { str } from "@/services/mappers";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
-import { deleteMaster, saveMaster } from "@/store/slices/mastersSlice";
+import { selectPickupMode } from "@/store/slices/authSlice";
+import { deleteMaster, fetchMasterItem, saveMaster } from "@/store/slices/mastersSlice";
 import { ensureMaster } from "@/store/ensure";
 import type { RootState } from "@/store";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -42,11 +44,29 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
     return initial;
   });
   // The record as loaded, so locked fields are decided by what's saved, not what's typed.
-  const ctx = useMemo<FormContext>(() => ({ isEdit, initial: docToFormValues(def, doc) }), [isEdit, def, doc]);
-  const [error, setError] = useState<string | null>(null);
+  const pickupMode = useAppSelector(selectPickupMode);
+  const ctx = useMemo<FormContext>(() => ({ isEdit, initial: docToFormValues(def, doc), doc, pickupMode }), [isEdit, def, doc, pickupMode]);
+  const locked = def.locked?.(ctx) ?? null;
+  const notice = locked ?? def.notice?.(ctx) ?? null;
   // An option change waiting for the user to confirm it.
   const [pending, setPending] = useState<{ key: string; value: string; title: string; message: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  // Waiting for the record's latest copy from the server (modules with `loadOnEdit`).
+  const [loadingDoc, setLoadingDoc] = useState(isEdit && Boolean(def.loadOnEdit));
+
+  useEffect(() => {
+    if (!isEdit || !def.loadOnEdit) return;
+    let live = true;
+    dispatch(fetchMasterItem({ key: def.key, id: route.params.id! })).then((res) => {
+      if (!live) return;
+      setLoadingDoc(false);
+      if (fetchMasterItem.fulfilled.match(res) && res.payload.doc) setValues(docToFormValues(def, res.payload.doc));
+      else if (fetchMasterItem.rejected.match(res)) showErrorToast(`Couldn't load the latest ${def.singular}`, res.payload ?? "Showing the saved copy.");
+    });
+    return () => {
+      live = false;
+    };
+  }, [dispatch, def, isEdit, route.params.id]);
 
   useEffect(() => {
     def.dependsOn?.forEach((k) => dispatch(ensureMaster(k)));
@@ -79,14 +99,14 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
   );
 
   const save = async () => {
+    if (locked || loadingDoc) return;
     const problem = validateForm(def, values, ctx);
-    setError(problem);
-    if (problem) return;
+    if (problem) return showErrorToast(`Can't save the ${def.singular}`, problem);
     setSaving(true);
     const res = await dispatch(saveMaster({ key: def.key, id: route.params.id, values }));
     setSaving(false);
     if (saveMaster.fulfilled.match(res)) navigation.goBack();
-    else setError(res.payload ?? "Couldn't save.");
+    else showErrorToast(`Couldn't save the ${def.singular}`, res.payload ?? "Please try again.");
   };
 
   const remove = () =>
@@ -97,15 +117,16 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
       onConfirm: async () => {
         const res = await dispatch(deleteMaster({ key: def.key, id: route.params.id! }));
         if (deleteMaster.fulfilled.match(res)) navigation.goBack();
-        else setError(res.payload ?? "Couldn't delete.");
+        else showErrorToast(`Couldn't delete the ${def.singular}`, res.payload ?? "Please try again.");
       },
     });
 
   const renderField = (f: FieldDef) => {
     const label = f.required ? f.label : `${f.label} (optional)`;
     const value = values[f.key] ?? "";
-    if (f.readOnly?.(ctx)) {
-      return <TextField key={f.key} label={f.label} value={value || "—"} editable={false} hint="Can't be changed here." />;
+    if (locked || f.readOnly?.(ctx)) {
+      const shown = f.type === "ref" && f.ref ? str(masters[f.ref.master].items.find((d) => d._id === value)?.[f.ref.labelKey]) : value;
+      return <TextField key={f.key} label={f.label} value={shown || "—"} editable={false} hint={locked ? undefined : "Can't be changed here."} />;
     }
     if (f.finalValue && value === f.finalValue) {
       return <TextField key={f.key} label={f.label} value={value} editable={false} hint="Can't be changed back once confirmed." />;
@@ -140,7 +161,7 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
       );
     }
     if (f.type === "ref" && f.ref) {
-      const source = masters[f.ref.master].items.filter((d) => d.status !== false && (!f.ref!.filter || f.ref!.filter(d)));
+      const source = masters[f.ref.master].items.filter((d) => d.status !== false && (!f.ref!.filter || f.ref!.filter(d, ctx)));
       return (
         <SelectField
           key={f.key}
@@ -172,12 +193,12 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
       <NavHeader
         left={<IconButton icon={X} onPress={() => navigation.goBack()} accessibilityLabel="Close" />}
         title={`${isEdit ? "Edit" : "New"} ${def.singular}`}
-        right={isEdit ? <IconButton icon={Trash2} onPress={remove} accessibilityLabel={`Delete ${def.singular}`} /> : undefined}
+        right={isEdit && (!doc || !def.canDelete || def.canDelete(doc)) ? <IconButton icon={Trash2} onPress={remove} accessibilityLabel={`Delete ${def.singular}`} /> : undefined}
       />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           {isEdit && !doc && <Notice message="This record is no longer in the list — it may have been deleted." />}
-          {error && <Notice message={error} tone="danger" />}
+          {notice && <Notice message={notice} />}
           {def.autoCode && !isEdit && (
             <Txt size={12.5} muted style={{ marginBottom: 12 }}>
               A {def.autoCode.prefix}- code is generated automatically when you save.
@@ -185,9 +206,11 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
           )}
           {visibleFields.map(renderField)}
         </ScrollView>
-        <View style={[styles.footer, { backgroundColor: t.bg, paddingBottom: insets.bottom + 12 }]}>
-          <Button title={isEdit ? "Save changes" : `Create ${def.singular}`} icon={Check} onPress={save} loading={saving} />
-        </View>
+        {!locked && (
+          <View style={[styles.footer, { backgroundColor: t.bg, paddingBottom: insets.bottom + 12 }]}>
+            <Button title={isEdit ? "Save changes" : `Create ${def.singular}`} icon={Check} onPress={save} loading={saving || loadingDoc} />
+          </View>
+        )}
       </KeyboardAvoidingView>
 
       <ConfirmDialog

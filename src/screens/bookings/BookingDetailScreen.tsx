@@ -1,6 +1,6 @@
 /** 04 · Booking detail — progress timeline, contacts, shipment, charges, next action. */
-import React, { useEffect, useState } from "react";
-import { Linking, ScrollView, Share, StyleSheet, View } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { Linking, RefreshControl, ScrollView, Share, StyleSheet, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ArrowRight, Check, ChevronLeft, Download, EllipsisVertical, FileText, Loader, MessageCircle, Phone, Share2, Trash2 } from "lucide-react-native";
 import { ActionSheet, BottomSheet } from "@/components/ActionSheet";
@@ -10,12 +10,16 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Avatar, Card, DashedDivider, IconButton, SectionTitle } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
 import { Txt } from "@/components/Txt";
+import { useRefresh } from "@/hooks/useBootstrapData";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import type { RootScreenProps } from "@/navigation/types";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import { bookingStage, selectPackingByBooking, STAGE_META } from "@/store/selectors";
 import { ensureMaster } from "@/store/ensure";
-import { deleteBooking } from "@/store/slices/bookingsSlice";
+import { deleteBooking, fetchBookings } from "@/store/slices/bookingsSlice";
+import { fetchContainers } from "@/store/slices/containersSlice";
+import { fetchFinance } from "@/store/slices/financeSlice";
+import { fetchMaster } from "@/store/slices/mastersSlice";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Booking } from "@/types";
 import { fullDate, money, shortDate } from "@/utils/format";
@@ -80,6 +84,12 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
   useEffect(() => {
     dispatch(ensureMaster("products"));
   }, [dispatch]);
+  const load = useCallback(
+    () =>
+      Promise.all([dispatch(fetchBookings()), dispatch(fetchContainers()), dispatch(fetchFinance()), dispatch(fetchMaster("customers")), dispatch(fetchMaster("products"))]),
+    [dispatch]
+  );
+  const { refreshing, onRefresh } = useRefresh(load);
   // Bundle marks and product names for the invoice form PDF.
   const invoiceExtras = {
     marks: (packing.get(route.params.id)?.marks ?? []).join(", "),
@@ -221,7 +231,11 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
         right={<IconButton icon={EllipsisVertical} onPress={() => setMenuOpen(true)} accessibilityLabel="More actions" />}
       />
 
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={t.primary} />}
+      >
         {/* Progress timeline */}
         <Card style={{ marginTop: 6 }}>
           <View style={styles.timeline}>

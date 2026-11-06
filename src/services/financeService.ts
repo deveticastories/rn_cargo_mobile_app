@@ -102,6 +102,10 @@ export const financeService = {
       deliveryPartnerAmount: body.deliveryPartnerAmount,
     });
   },
+  /** "Add fund" (web console's Credit note): money put into petty cash. */
+  async createCreditNote(body: { amount: number; description?: string }) {
+    await api.post(API_ENDPOINTS.CREDIT_NOTES.BASE, { amount: body.amount, description: body.description });
+  },
   async createExpense(body: { date: string; type: string; paymentType: string; amount: number; description?: string }) {
     await api.post(API_ENDPOINTS.DAILY_EXPENSES.BASE, {
       date: body.date,

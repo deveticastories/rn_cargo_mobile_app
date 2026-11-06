@@ -12,7 +12,8 @@ import Svg, { G, Path } from "react-native-svg";
 import { useTheme } from "@/theme/ThemeProvider";
 import { Txt } from "./Txt";
 
-const MIN_VISIBLE_MS = 1600;
+// Just long enough for the intro to play; the app is ready well before.
+const MIN_VISIBLE_MS = 900;
 /** Must match expo-splash-screen's backgroundColor in app.json (and android colors.xml). */
 const SPLASH_BG = "#0D3949";
 const ICON = 113;
@@ -33,8 +34,8 @@ export function AnimatedSplash({ ready, onFinish }: { ready: boolean; onFinish: 
     setShownAt(Date.now());
     void SplashScreen.hideAsync();
     Animated.sequence([
-      Animated.timing(intro, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.timing(text, { toValue: 1, duration: 650, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(intro, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(text, { toValue: 1, duration: 400, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start();
     Animated.loop(Animated.timing(pulse, { toValue: 1, duration: 2200, easing: Easing.out(Easing.quad), useNativeDriver: true })).start();
   };
@@ -43,7 +44,7 @@ export function AnimatedSplash({ ready, onFinish }: { ready: boolean; onFinish: 
     if (!ready || shownAt === null) return;
     const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - shownAt));
     const timer = setTimeout(() => {
-      Animated.timing(exit, { toValue: 1, duration: 420, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(({ finished }) => {
+      Animated.timing(exit, { toValue: 1, duration: 260, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(({ finished }) => {
         if (finished) onFinish();
       });
     }, wait);

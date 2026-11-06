@@ -131,7 +131,7 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
     if (list.length === 0) return;
     setDownloading("containerPacking");
     try {
-      const lists = await Promise.all(list.map((b) => packageService.getByBooking(b.id).catch(() => null)));
+      const lists = await Promise.all(list.map((b) => packageService.getCached(b.id).catch(() => null)));
       const nameOf = (items: { _id: string; name?: unknown }[], id?: string) => (id ? str(items.find((x) => x._id === id)?.name) : "") || "-";
       const bundles = lists
         .flatMap((l) => l?.bundles ?? [])
@@ -271,6 +271,8 @@ export function StuffingScreen({ navigation }: TabScreenProps<"Stuffing">) {
                   placeholder="Choose a container"
                   value={containerId}
                   onChange={setContainerId}
+                  // Opening the picker reads containers again, so new ones show without a refresh.
+                  onOpen={() => dispatch(fetchContainers())}
                   options={stuffable.map((c) => ({ value: c.id, label: `${c.code} — ${c.company}` }))}
                   emptyText="No containers free for stuffing. Create one on the web console first."
                 />

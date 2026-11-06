@@ -20,6 +20,14 @@ export const masterService = {
     const { data } = await api.get(cfg.endpoint);
     return listFrom(data, cfg.listKey);
   },
+  /** One record, as the server has it now. */
+  async get(cfg: MasterEndpoint, id: string): Promise<BackendDoc | null> {
+    const { data } = await api.get(`${cfg.endpoint}/${id}`);
+    for (const doc of [itemFrom(data, cfg.itemKey), itemFrom(data, "data"), data as BackendDoc]) {
+      if (doc && typeof doc === "object" && doc._id) return doc;
+    }
+    return null;
+  },
   async create(cfg: MasterEndpoint, body: Record<string, unknown>): Promise<BackendDoc> {
     const { data } = await api.post(cfg.endpoint, body);
     return itemFrom(data, cfg.itemKey);

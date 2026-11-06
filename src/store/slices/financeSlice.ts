@@ -62,6 +62,19 @@ export const addExpense = createAppAsyncThunk(
   }
 );
 
+/** Adds money to petty cash (a credit note), then re-reads the finance lists. */
+export const addFund = createAppAsyncThunk(
+  "finance/addFund",
+  async (body: { amount: number; description?: string }, { dispatch, rejectWithValue }) => {
+    try {
+      await financeService.createCreditNote(body);
+      await dispatch(fetchFinance());
+    } catch (err) {
+      return rejectWithValue(errorMessage(err, "Couldn't add the fund."));
+    }
+  }
+);
+
 const financeSlice = createSlice({
   name: "finance",
   initialState,
