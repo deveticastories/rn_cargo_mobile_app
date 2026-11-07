@@ -14,7 +14,10 @@ import { Txt } from "./Txt";
 export interface SelectOption {
   value: string;
   label: string;
+  /** Second line; also what search matches. */
   sublabel?: string;
+  /** Shown instead of `sublabel` when set (e.g. a coloured place). */
+  sublabelNode?: React.ReactNode;
 }
 
 interface SelectFieldProps {
@@ -167,9 +170,9 @@ export function SelectSheet({
                     <Txt size={15} weight="semibold">
                       {item.label}
                     </Txt>
-                    {item.sublabel ? (
+                    {item.sublabelNode || item.sublabel ? (
                       <Txt size={12.5} muted>
-                        {item.sublabel}
+                        {item.sublabelNode ?? item.sublabel}
                       </Txt>
                     ) : null}
                   </View>

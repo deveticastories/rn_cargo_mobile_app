@@ -9,6 +9,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import type { Booking } from "@/types";
 import { shortDate } from "@/utils/format";
 import { Avatar, Badge, Card, Tag } from "./primitives";
+import { Place, type PlaceParts } from "./Place";
 import { Txt } from "./Txt";
 
 export function bookingUnits(b: Booking): string {
@@ -34,8 +35,8 @@ export function BookingCard({
   onPress,
 }: {
   booking: Booking;
-  senderPlace: string;
-  receiverPlaceText: string;
+  senderPlace: PlaceParts;
+  receiverPlaceText: PlaceParts;
   /** Packing-list progress, shown while bundles are still being added. */
   packed?: { packed: number; total: number };
   /** Badge to show instead of the booking's repacking/stuffing stage. */
@@ -62,7 +63,7 @@ export function BookingCard({
             {booking.sender.name || "—"}
           </Txt>
           <Txt size={12.5} muted numberOfLines={1}>
-            {senderPlace || " "}
+            {senderPlace.location || senderPlace.country ? <Place {...senderPlace} /> : " "}
           </Txt>
         </View>
         <View style={styles.route}>
@@ -82,7 +83,7 @@ export function BookingCard({
             {booking.receiver.name || "—"}
           </Txt>
           <Txt size={12.5} muted numberOfLines={1}>
-            {receiverPlaceText || " "}
+            {receiverPlaceText.location || receiverPlaceText.country ? <Place {...receiverPlaceText} single /> : " "}
           </Txt>
         </View>
       </View>
@@ -99,7 +100,7 @@ export function BookingCard({
 }
 
 /** Compact row for "Recent bookings" on the dashboard. */
-export function BookingRow({ booking, city, onPress, last }: { booking: Booking; city: string; onPress: () => void; last?: boolean }) {
+export function BookingRow({ booking, city, onPress, last }: { booking: Booking; city: PlaceParts; onPress: () => void; last?: boolean }) {
   const t = useTheme();
   const stage = STAGE_META[bookingStage(booking)];
   return (
@@ -115,7 +116,12 @@ export function BookingRow({ booking, city, onPress, last }: { booking: Booking;
       <View style={{ flex: 1, marginHorizontal: 12 }}>
         <Txt size={14.5} weight="bold" numberOfLines={1}>
           {booking.sender.name || "—"}
-          {city ? ` → ${city}` : ""}
+          {city.location || city.country ? (
+            <>
+              {" → "}
+              <Place {...city} />
+            </>
+          ) : null}
         </Txt>
         <Txt size={11.5} mono muted numberOfLines={1} style={{ marginTop: 2 }}>
           {booking.code} · {bookingUnits(booking)}

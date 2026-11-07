@@ -131,6 +131,23 @@ export function MasterFormScreen({ navigation, route }: RootScreenProps<"MasterF
     if (f.finalValue && value === f.finalValue) {
       return <TextField key={f.key} label={f.label} value={value} editable={false} hint="Can't be changed back once confirmed." />;
     }
+    if (f.type === "select" && f.choicesFrom) {
+      const src = f.choicesFrom;
+      const names = masters[src.master].items.filter((d) => d.status !== false).map((d) => str(d[src.labelKey]).trim()).filter(Boolean);
+      // A value saved before it was picked from the list still shows (and stays selectable).
+      if (value && !names.includes(value)) names.unshift(value);
+      return (
+        <SelectField
+          key={f.key}
+          label={label}
+          placeholder={`Choose ${f.label.toLowerCase()}`}
+          value={value}
+          onChange={(v) => choose(f, v)}
+          options={[...new Set(names)].map((n) => ({ value: n, label: n }))}
+          emptyText={`No ${MASTERS[src.master].title.toLowerCase()} yet — add one under More first.`}
+        />
+      );
+    }
     if (f.type === "select" && f.options) {
       if (f.options.length <= 3) {
         return (

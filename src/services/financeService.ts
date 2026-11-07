@@ -64,6 +64,8 @@ function toCreditNote(doc: BackendDoc): CreditNoteEntry {
 export const financeService = {
   async listInvoices(): Promise<Invoice[]> {
     const { data } = await api.get(API_ENDPOINTS.INVOICES.BASE);
+    // TEMP: inspect the invoice list response.
+    console.log("GET", API_ENDPOINTS.INVOICES.BASE, JSON.stringify(data, null, 2));
     return listFrom(data, "invoiceList").map(toInvoice);
   },
   async listReceipts(): Promise<ReceiptEntry[]> {

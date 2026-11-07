@@ -11,6 +11,7 @@ import { NavHeader, Notice, Screen } from "@/components/Screen";
 import { Segmented } from "@/components/Segmented";
 import { SelectField, type SelectOption } from "@/components/SelectSheet";
 import { TextField } from "@/components/TextField";
+import { Place } from "@/components/Place";
 import { Txt } from "@/components/Txt";
 import type { RootScreenProps } from "@/navigation/types";
 import { refField, str } from "@/services/mappers";
@@ -74,6 +75,7 @@ export function NewBookingScreen({ navigation }: RootScreenProps<"NewBooking">) 
     value: c._id,
     label: str(c.name),
     sublabel: [c.location, c.country].filter(Boolean).map(String).join(", "),
+    sublabelNode: <Place location={str(c.location)} country={str(c.country)} />,
   });
   const senders = useMemo(() => customers.filter((c) => c.customerType === "Sender" && c.status !== false).map(toOption), [customers]);
   const receivers = useMemo(() => customers.filter((c) => c.customerType === "Receiver" && c.status !== false).map(toOption), [customers]);

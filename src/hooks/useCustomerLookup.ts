@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useAppSelector } from "@/store/hooks";
+import type { PlaceParts } from "@/components/Place";
 import type { Booking } from "@/types";
 
 export interface CustomerInfo {
@@ -34,6 +35,16 @@ export function useCustomerLookup() {
     };
     const receiverCity = (b: Booking) => b.receiver.location || map.get(b.receiver.id)?.location || b.receiver.country || "";
     const receiverCountry = (b: Booking) => b.receiver.country || map.get(b.receiver.id)?.country || "";
-    return { map, senderPlace, receiverPlace, receiverCity, receiverCountry };
+    // The same places split into location / country, for colouring them.
+    const senderParts = (b: Booking): PlaceParts => ({ location: senderPlace(b) });
+    const receiverParts = (b: Booking): PlaceParts => {
+      const c = map.get(b.receiver.id);
+      return { location: b.receiver.location || c?.location || "", country: receiverCountry(b) };
+    };
+    const receiverCityParts = (b: Booking): PlaceParts => {
+      const location = b.receiver.location || map.get(b.receiver.id)?.location || "";
+      return location ? { location } : { country: b.receiver.country || "" };
+    };
+    return { map, senderPlace, receiverPlace, receiverCity, receiverCountry, senderParts, receiverParts, receiverCityParts };
   }, [customers]);
 }

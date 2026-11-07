@@ -10,6 +10,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Download } from "lucide-react-n
 import { showError } from "@/components/AppAlert";
 import { Badge, Card, DashedDivider, IconButton, Stat } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
+import { Place } from "@/components/Place";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import type { MoreScreenProps } from "@/navigation/types";
@@ -264,7 +265,15 @@ export function StuffedBookingCard({
             {item.sender.name || "—"} → {item.receiver.name || "—"}
           </Txt>
           <Txt size={12} muted numberOfLines={1}>
-            {[item.sender.lines[0], item.receiver.lines[0]].filter(Boolean).join("  →  ") || " "}
+            {item.sender.place.location || item.receiver.place.location || item.receiver.place.country ? (
+              <>
+                <Place {...item.sender.place} />
+                {item.sender.place.location && (item.receiver.place.location || item.receiver.place.country) ? "  →  " : ""}
+                <Place {...item.receiver.place} single />
+              </>
+            ) : (
+              " "
+            )}
           </Txt>
           <View style={[styles.stats, { borderColor: t.border }]}>
             <Stat label="Bundles" value={String(item.bundles)} />

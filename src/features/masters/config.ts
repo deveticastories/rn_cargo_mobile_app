@@ -19,6 +19,7 @@ import {
   Bike,
 } from "lucide-react-native";
 import { API_ENDPOINTS } from "@/api/endpoints";
+import type { PlaceSeg } from "@/components/Place";
 import type { BackendDoc } from "@/types";
 import type { Tone } from "@/theme/palette";
 import { money } from "@/utils/format";
@@ -48,6 +49,8 @@ export interface FieldDef {
   required?: boolean;
   placeholder?: string;
   options?: string[];
+  /** For `select` fields: options are another master's records, saved by their name (not their id). */
+  choicesFrom?: { master: MasterKey; labelKey: string };
   /** For `ref` fields: which master the options come from and how to label them. */
   ref?: { master: MasterKey; labelKey: string; filter?: (doc: BackendDoc, ctx: FormContext) => boolean };
   /** Only shown when this returns true for the current form values. */
@@ -112,6 +115,9 @@ export interface MasterDef {
   noListAdd?: boolean;
   fields: FieldDef[];
   primary: (doc: BackendDoc) => string;
+  /** Lines with coloured locations / countries, shown instead of the plain primary / secondary text. */
+  primarySegs?: (doc: BackendDoc) => PlaceSeg[];
+  secondarySegs?: (doc: BackendDoc) => PlaceSeg[];
   secondary: (doc: BackendDoc) => string;
   /** Extra badge besides Active/Inactive (e.g. a pickup's collection status). */
   badge?: (doc: BackendDoc) => { label: string; tone: Tone } | null;
@@ -155,6 +161,13 @@ export const pickupStatusFor = (collected: number, assigned: number) =>
   collected <= 0 ? "Pending" : collected >= assigned ? "Collected" : "Partially Collected";
 
 const name = (doc: BackendDoc) => str(doc.name);
+/** Segments joined with " · ", skipping empty ones; an array is one already-built group. */
+const joinSegs = (...parts: (PlaceSeg | PlaceSeg[])[]): PlaceSeg[] => {
+  const filled = parts.filter((p) => (Array.isArray(p) ? p.length > 0 : typeof p === "string" ? p !== "" : "location" in p ? p.location : p.country));
+  return filled.flatMap((p, i) => [...(i ? [" · "] : []), ...(Array.isArray(p) ? p : [p])]);
+};
+/** "India → UAE" with both countries coloured. */
+const routeSegs = (from: string, to: string): PlaceSeg[] => [{ country: from || "—" }, " → ", { country: to || "—" }];
 const join = (...parts: unknown[]) => parts.filter((p) => p !== undefined && p !== null && p !== "").map(String).join(" · ");
 
 const BUNDLE_TYPES = ["Bundle", "Box", "CBM", "KG"];
@@ -192,15 +205,24 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     icon: User,
     tone: "info",
     hasStatus: true,
+    dependsOn: ["countries"],
     primary: name,
     secondary: (d) => join(d.customerType, d.location, d.country, d.whatsapp),
+    secondarySegs: (d) => joinSegs(str(d.customerType), { location: str(d.location) }, { country: str(d.country) }, str(d.whatsapp)),
     badge: (d) => (d.customerType ? { label: str(d.customerType), tone: d.customerType === "Sender" ? "info" : "purple" } : null),
     fields: [
       { key: "customerType", label: "Type", type: "select", options: ["Sender", "Receiver"], required: true },
       { key: "name", label: "Name", type: "text", required: true },
       { key: "whatsapp", label: "WhatsApp", type: "phone", required: true },
       { key: "location", label: "Location", type: "text", required: true },
-      { key: "country", label: "Country", type: "text", visibleWhen: (v) => v.customerType === "Receiver", required: true },
+      {
+        key: "country",
+        label: "Country",
+        type: "select",
+        choicesFrom: { master: "countries", labelKey: "name" },
+        visibleWhen: (v) => v.customerType === "Receiver",
+        required: true,
+      },
       { key: "alternativeNo", label: "Alternative number", type: "phone", visibleWhen: (v) => v.customerType === "Receiver" },
       { key: "discount", label: "Discount", type: "number", visibleWhen: (v) => v.customerType === "Receiver" },
     ],
@@ -216,6 +238,7 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     tone: "success",
     hasStatus: true,
     primary: (d) => str(d.location),
+    primarySegs: (d) => [{ location: str(d.location) }],
     secondary: (d) => join(d.inCharge, d.contact),
     fields: [
       { key: "location", label: "Location", type: "text", required: true },
@@ -234,6 +257,7 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     tone: "purple",
     hasStatus: true,
     primary: name,
+    primarySegs: (d) => [{ country: str(d.name) }],
     secondary: () => "Delivery route endpoint",
     fields: [{ key: "name", label: "Country name", type: "text", required: true }],
   },
@@ -250,6 +274,8 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     dependsOn: ["countries"],
     primary: name,
     secondary: (d) => join(`${str(refField(d.from, "name"))} → ${str(refField(d.toCountry, "name"))}`, d.charge !== undefined ? money(Number(d.charge)) : ""),
+    secondarySegs: (d) =>
+      joinSegs(routeSegs(str(refField(d.from, "name")), str(refField(d.toCountry, "name"))), d.charge !== undefined ? money(Number(d.charge)) : ""),
     fields: [
       { key: "name", label: "Name", type: "text", required: true },
       { key: "whatsapp", label: "WhatsApp", type: "phone", required: true },
@@ -285,11 +311,13 @@ export const MASTERS: Record<MasterKey, MasterDef> = {
     icon: Tag,
     tone: "success",
     hasStatus: false,
+    dependsOn: ["countries"],
     primary: (d) => `${str(d.from)} → ${str(d.to)}`,
+    primarySegs: (d) => routeSegs(str(d.from), str(d.to)),
     secondary: (d) => `${money(Number(d.price ?? 0))} per ${str(d.uom)}`,
     fields: [
-      { key: "from", label: "From", type: "text", required: true, placeholder: "India" },
-      { key: "to", label: "To", type: "text", required: true, placeholder: "UAE" },
+      { key: "from", label: "From", type: "select", choicesFrom: { master: "countries", labelKey: "name" }, required: true },
+      { key: "to", label: "To", type: "select", choicesFrom: { master: "countries", labelKey: "name" }, required: true },
       { key: "uom", label: "Unit", type: "select", options: BUNDLE_TYPES, required: true },
       { key: "price", label: "Price", type: "number", required: true },
     ],

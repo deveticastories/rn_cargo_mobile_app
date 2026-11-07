@@ -41,7 +41,9 @@ function prepareNotifications(): Promise<boolean> {
 
 /** "Download complete" notification; tapping it opens the saved file. */
 async function notifyDownloaded(fileName: string, uri: string) {
-  if (!(await prepareNotifications())) {
+  // The permission prompt shouldn't hold up the download; without an answer in time, a toast says it's saved.
+  const ready = await Promise.race([prepareNotifications(), new Promise<boolean>((r) => setTimeout(() => r(false), 5000))]);
+  if (!ready) {
     ToastAndroid.show(`${fileName} saved to Downloads`, ToastAndroid.SHORT);
     return;
   }
@@ -121,6 +123,44 @@ async function withPdfFont(html: string): Promise<string> {
   return html.includes("</head>") ? html.replace("</head>", `${css}</head>`) : css + html;
 }
 
+/** How long one render may take before it's treated as stuck. */
+const RENDER_TIMEOUT_MS = 20000;
+
+class RenderTimeout extends Error {}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new RenderTimeout("The PDF took too long to create. Please try again.")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
+/**
+ * HTML → PDF file. expo-print's off-screen WebView sometimes never reports the page loaded — seen on
+ * the second download after coming back to the app, when it waits on the embedded fonts — and its
+ * promise then never settles, leaving the download spinning. So each render is timed out, and a stuck
+ * one is retried once without the embedded fonts (the phone's own fonts print instead).
+ */
+async function renderPdf(html: string, size?: PdfFile["size"]) {
+  const render = (h: string) => withTimeout(Print.printToFileAsync(size ? { html: h, ...size } : { html: h }), RENDER_TIMEOUT_MS);
+  const page = await withPdfFont(html);
+  try {
+    return await render(page);
+  } catch (e) {
+    if (!(e instanceof RenderTimeout) || page === html) throw e;
+  }
+  return render(html);
+}
+
 /** Writes one rendered PDF into Downloads (Android) and returns a URI other apps can open. */
 async function saveToDownloads(localUri: string, fileName: string): Promise<string> {
   const path = localUri.replace(/^file:\/\//, "");
@@ -147,8 +187,7 @@ export async function downloadPdfs(files: PdfFile[]): Promise<number> {
   if (Platform.OS === "android") void prepareNotifications();
   for (const { fileName, html, size } of files) {
     const name = fileName.replace(/[^\w.-]/g, "_");
-    const page = await withPdfFont(html);
-    const { uri } = await Print.printToFileAsync(size ? { html: page, ...size } : { html: page });
+    const { uri } = await renderPdf(html, size);
     try {
       if (Platform.OS === "android") await notifyDownloaded(name, await saveToDownloads(uri, name));
       else {

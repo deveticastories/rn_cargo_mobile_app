@@ -9,6 +9,7 @@ import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Avatar, Card, DashedDivider, IconButton, SectionTitle } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
+import { Place, type PlaceParts } from "@/components/Place";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
@@ -273,13 +274,15 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
         {/* Contacts */}
         <Card padded={false} style={{ marginTop: 12 }}>
           <ContactRow
-            role={`Sender${senderPlace ? ` · ${senderPlace}` : ""}`}
+            role="Sender"
+            place={lookup.senderParts(booking)}
             name={booking.sender.name}
             action={<IconButton icon={MessageCircle} size={38} onPress={() => openChat(booking.sender.whatsapp || senderInfo?.whatsapp)} accessibilityLabel="WhatsApp sender" />}
           />
           <View style={{ height: StyleSheet.hairlineWidth, backgroundColor: t.border }} />
           <ContactRow
-            role={`Receiver${receiverPlace ? ` · ${receiverPlace}` : ""}`}
+            role="Receiver"
+            place={lookup.receiverParts(booking)}
             name={booking.receiver.name}
             action={<IconButton icon={Phone} size={38} onPress={() => call(booking.receiver.whatsapp || receiverInfo?.whatsapp || receiverInfo?.alternativeNo)} accessibilityLabel="Call receiver" />}
           />
@@ -412,13 +415,19 @@ export function BookingDetailScreen({ navigation, route }: RootScreenProps<"Book
   );
 }
 
-function ContactRow({ role, name, action }: { role: string; name: string; action: React.ReactNode }) {
+function ContactRow({ role, place, name, action }: { role: string; place?: PlaceParts; name: string; action: React.ReactNode }) {
   return (
     <View style={styles.contact}>
       <Avatar name={name || "?"} size={42} />
       <View style={{ flex: 1, marginHorizontal: 12 }}>
         <Txt size={12} muted numberOfLines={1}>
           {role}
+          {place && (place.location || place.country) ? (
+            <>
+              {" · "}
+              <Place {...place} single />
+            </>
+          ) : null}
         </Txt>
         <Txt size={15.5} weight="bold" numberOfLines={1}>
           {name || "—"}

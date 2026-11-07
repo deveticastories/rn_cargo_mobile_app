@@ -130,8 +130,8 @@ export function BookingsScreen({ navigation, route }: TabScreenProps<"Bookings">
           renderItem={({ item }) => (
             <BookingCard
               booking={item}
-              senderPlace={lookup.senderPlace(item)}
-              receiverPlaceText={lookup.receiverPlace(item)}
+              senderPlace={lookup.senderParts(item)}
+              receiverPlaceText={lookup.receiverParts(item)}
               packed={tabOf.get(item.id) === "packingList" ? packedProgress(item, packing) : undefined}
               // Packing list cards show the pack status (Repacking required / Package ready); the others show their tab.
               status={tabOf.get(item.id) === "packingList" ? STAGE_META[bookingStage(item)] : LIST_TAB_META[tabOf.get(item.id) ?? bookingListTab(item, packing)]}

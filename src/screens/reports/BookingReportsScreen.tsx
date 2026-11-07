@@ -11,6 +11,7 @@ import { DatePickerField } from "@/components/DatePickerField";
 import { Avatar, Badge, Card, IconButton, Stat } from "@/components/primitives";
 import { EmptyView, NavHeader, Screen } from "@/components/Screen";
 import { Segmented } from "@/components/Segmented";
+import { Place, usePlaceColor } from "@/components/Place";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
@@ -24,7 +25,7 @@ import { radius } from "@/theme/fonts";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Booking } from "@/types";
 import { fullDate, money, parseDate } from "@/utils/format";
-import { downloadTablePdf } from "@/utils/tablePdf";
+import { downloadTablePdf, type PdfSpan } from "@/utils/tablePdf";
 import { useStuffedData, type StuffedBooking } from "@/screens/stuffedContainers/useStuffedData";
 
 type GroupBy = "container" | "customer" | "country" | "partner";
@@ -69,6 +70,7 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
   const stuffings = useAppSelector((s) => s.containers.stuffings);
   const containers = useAppSelector((s) => s.containers.items);
   const lookup = useCustomerLookup();
+  const placeColor = usePlaceColor();
   const { bookingRow } = useStuffedData();
 
   const now = new Date();
@@ -168,12 +170,19 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
     setDownloading(g.key);
     try {
       const label = GROUP_LABELS[groupBy];
+      // Places print in their place colour; a receiver's place takes its country's.
+      const groupName: PdfSpan[] =
+        groupBy === "country" && !g.key.startsWith("~")
+          ? [{ text: g.label, color: placeColor(g.label) }]
+          : groupBy === "customer" && g.sublabel
+            ? [g.label, " · ", { text: g.sublabel, color: placeColor(g.sublabel) }]
+            : [[g.label, g.sublabel].filter(Boolean).join(" · ")];
       const slug = g.label.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "") || "group";
       await downloadTablePdf(`booking-report-${groupBy}-${slug}-${from}-to-${to}.pdf`, {
         title: `${label.toUpperCase()} WISE BOOKING REPORT`,
         landscape: true,
         info: [
-          [label, [g.label, g.sublabel].filter(Boolean).join(" · ")],
+          [label, groupName],
           ["Period", rangeLabel],
           ["No. of Bookings", String(g.rows.length)],
           ["No. of Bundles", String(g.bundles)],
@@ -182,10 +191,13 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
         head: ["Sl No", "Booking ID", "Receiver Details", "Bundle Mark", "Bundle Count", "Delivery Partner", "Delivery Partner Payable Amount", "Total Receivable Amount"],
         body: g.rows.map((r, i) => {
           const rc = receiverOf(r);
+          // The receiver's full details (name, place, number) print in their country's colour.
+          const details = [rc.name, rc.location, rc.contact].filter(Boolean).join(", ");
+          const place = lookup.receiverCountry(r.booking) || rc.location;
           return [
             String(i + 1),
             r.booking.code,
-            [rc.name, rc.location, rc.contact].filter(Boolean).join(", ") || "-",
+            details ? [{ text: details, color: place ? placeColor(place) : undefined }] : "-",
             r.item.bundleMarks || "-",
             String(r.bundles),
             r.partner || "-",
@@ -270,6 +282,7 @@ export function BookingReportsScreen({ navigation }: MoreScreenProps<"BookingRep
               group={g}
               open={openKey === g.key}
               onToggle={() => setOpenKey(openKey === g.key ? null : g.key)}
+              groupBy={groupBy}
               downloading={downloading === g.key}
               onDownload={() => downloadGroupPdf(g)}
             />
@@ -290,12 +303,14 @@ function GroupCard({
   group,
   open,
   onToggle,
+  groupBy,
   downloading,
   onDownload,
 }: {
   group: ReportGroup;
   open: boolean;
   onToggle: () => void;
+  groupBy: GroupBy;
   downloading: boolean;
   onDownload: () => void;
 }) {
@@ -305,11 +320,11 @@ function GroupCard({
       <Pressable onPress={onToggle} style={styles.groupHead} accessibilityRole="button" accessibilityState={{ expanded: open }}>
         <View style={{ flex: 1 }}>
           <Txt size={15} weight="bold" numberOfLines={1}>
-            {group.label}
+            {groupBy === "country" && !group.key.startsWith("~") ? <Place country={group.label} /> : group.label}
           </Txt>
           {group.sublabel ? (
             <Txt size={12} muted numberOfLines={1}>
-              {group.sublabel}
+              {groupBy === "customer" ? <Place location={group.sublabel} /> : group.sublabel}
             </Txt>
           ) : null}
           <View style={styles.groupBadges}>
@@ -356,7 +371,7 @@ function BookingCard({ row: r }: { row: ReportRow }) {
           <Txt size={14.5} weight="bold" numberOfLines={1}>
             {rc.name || "—"}
           </Txt>
-          <IconLine icon={MapPin} text={rc.location || "Location not set"} />
+          <IconLine icon={MapPin} text={rc.location ? <Place {...r.item.receiver.place} single /> : "Location not set"} />
           <IconLine icon={Phone} text={rc.contact || "No contact number"} />
         </View>
       </View>
@@ -376,7 +391,7 @@ function BookingCard({ row: r }: { row: ReportRow }) {
 
 type IconType = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 
-function IconLine({ icon: Icon, text }: { icon: IconType; text: string }) {
+function IconLine({ icon: Icon, text }: { icon: IconType; text: React.ReactNode }) {
   const t = useTheme();
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>

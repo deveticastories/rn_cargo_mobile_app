@@ -58,7 +58,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
   const recentReceipts = useAppSelector(selectReceiptRows).slice(0, 5);
   const financeStatus = useAppSelector((s) => s.finance.status);
   const todayError = useAppSelector((s) => s.finance.error ?? s.containers.error);
-  const { receiverCity } = useCustomerLookup();
+  const { receiverCityParts } = useCustomerLookup();
   // Pickup role: the dashboard is about pickup assigns instead of bookings.
   const pickups = useAppSelector((s) => s.masters.pickupAssigns.items);
   const pickupStatus = useAppSelector((s) => s.masters.pickupAssigns.status);
@@ -301,7 +301,7 @@ export function DashboardScreen({ navigation }: TabScreenProps<"Home">) {
                   <BookingRow
                     key={b.id}
                     booking={b}
-                    city={receiverCity(b)}
+                    city={receiverCityParts(b)}
                     last={i === recent.length - 1}
                     onPress={() => navigation.navigate("BookingDetail", { id: b.id })}
                   />

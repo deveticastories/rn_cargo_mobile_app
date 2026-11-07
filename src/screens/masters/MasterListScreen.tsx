@@ -8,6 +8,7 @@ import { Button } from "@/components/Button";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Badge, Card, IconButton, IconTile } from "@/components/primitives";
 import { EmptyView, LoadingView, Notice, Screen } from "@/components/Screen";
+import { PlaceSegs } from "@/components/Place";
 import { Txt } from "@/components/Txt";
 import { TextField } from "@/components/TextField";
 import { MASTERS, isActive, pickupCollectedCount, pickupFullyCollected, pickupStarted, type MasterKey } from "@/features/masters/config";
@@ -158,10 +159,10 @@ function MasterListView({ masterKey, onBack, noAdd }: { masterKey: MasterKey; on
                 <IconTile icon={def.icon} tone={def.tone} size={40} />
                 <View style={{ flex: 1, marginHorizontal: 12 }}>
                   <Txt size={15} weight="bold" numberOfLines={1}>
-                    {def.primary(item) || "—"}
+                    {def.primarySegs ? <PlaceSegs segs={def.primarySegs(item)} /> : def.primary(item) || "—"}
                   </Txt>
                   <Txt size={12.5} muted numberOfLines={1} style={{ marginTop: 2 }}>
-                    {def.secondary(item) || " "}
+                    {def.secondarySegs ? <PlaceSegs segs={def.secondarySegs(item)} /> : def.secondary(item) || " "}
                   </Txt>
                 </View>
                 <View style={{ alignItems: "flex-end", gap: 6 }}>

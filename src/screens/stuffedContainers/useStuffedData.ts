@@ -8,6 +8,7 @@ import { useCustomerLookup } from "@/hooks/useCustomerLookup";
 import { num, str } from "@/services/mappers";
 import { useAppSelector } from "@/store/hooks";
 import { selectPackingByBooking, selectReceivedByInvoice } from "@/store/selectors";
+import type { PlaceParts } from "@/components/Place";
 import type { Booking, Invoice } from "@/types";
 import { fullDate } from "@/utils/format";
 import { downloadTablePdf, type PdfParty } from "@/utils/tablePdf";
@@ -27,8 +28,8 @@ export interface StuffedBooking {
   id: string;
   booking?: Booking;
   invoice?: Invoice;
-  sender: PdfParty & { contact: string };
-  receiver: PdfParty & { contact: string };
+  sender: PdfParty & { contact: string; place: PlaceParts };
+  receiver: PdfParty & { contact: string; place: PlaceParts };
   bundles: number;
   bundleMarks: string;
   receivable?: number;
@@ -79,11 +80,13 @@ export function useStuffedData() {
           name: b?.sender.name ?? "",
           lines: senderInfo ? [senderInfo.location, senderInfo.whatsapp ? `Ph: ${senderInfo.whatsapp}` : ""] : [],
           contact: b?.sender.whatsapp || senderInfo?.whatsapp || "—",
+          place: { location: senderInfo?.location ?? "" },
         },
         receiver: {
           name: b?.receiver.name ?? "",
           lines: [[receiverLocation, receiverCountry].filter(Boolean).join(", "), receiverInfo?.whatsapp ? `Ph: ${receiverInfo.whatsapp}` : ""],
           contact: b?.receiver.whatsapp || receiverInfo?.whatsapp || "—",
+          place: { location: receiverLocation, country: receiverCountry },
         },
         bundles: b ? b.actualBundle || b.bundleCount : 0,
         bundleMarks: (packing.get(id)?.marks ?? []).join(", "),

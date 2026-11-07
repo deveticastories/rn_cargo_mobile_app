@@ -8,15 +8,26 @@ import { downloadPdf } from "./downloads";
 import { A4_LANDSCAPE, A4_PORTRAIT, esc, framedDocument, framedSheet } from "./pdfFrame";
 import { LOGO_DATA_URI } from "./pdfLogo";
 
+/** A run of text in a cell, optionally in its own colour (e.g. a place in its place colour). */
+export type PdfSpan = string | { text: string; color?: string };
+
+/** A cell: plain text, or runs of text some of which are coloured. */
+export type PdfCell = string | PdfSpan[];
+
+const cellHtml = (c: PdfCell) =>
+  typeof c === "string"
+    ? esc(c)
+    : c.map((s) => (typeof s === "string" ? esc(s) : s.color ? `<span style="color:${esc(s.color)}">${esc(s.text)}</span>` : esc(s.text))).join("");
+
 export interface PdfTable {
   head: string[];
-  body: string[][];
+  body: PdfCell[][];
   foot?: string[];
 }
 
 export interface TablePdf extends PdfTable {
   title: string;
-  info: [string, string][];
+  info: [string, PdfCell][];
   /** Wide reports (many columns) print on landscape A4, like the web's. */
   landscape?: boolean;
   /** Further tables below the main one, each under its own heading. */
@@ -27,7 +38,7 @@ const LANDSCAPE_STYLE = "@page { size: A4 landscape; } body { font-size: 8.5pt; 
 
 const page = (title: string, content: string, landscape = false) => framedDocument([framedSheet(title, content)], landscape ? LANDSCAPE_STYLE : "");
 function tableHtml({ title, info, head, body, foot, sections = [], landscape }: TablePdf): string {
-  const row = (cells: string[], tag: "td" | "th") => `<tr>${cells.map((c) => `<${tag}>${esc(c)}</${tag}>`).join("")}</tr>`;
+  const row = (cells: PdfCell[], tag: "td" | "th") => `<tr>${cells.map((c) => `<${tag}>${cellHtml(c)}</${tag}>`).join("")}</tr>`;
   const table = (t: PdfTable, emptyText = "—") => `<table>
     <thead>${row(t.head, "th")}</thead>
     <tbody>${t.body.length ? t.body.map((r) => row(r, "td")).join("") : `<tr><td colspan="${t.head.length}">${esc(emptyText)}</td></tr>`}</tbody>
@@ -36,7 +47,7 @@ function tableHtml({ title, info, head, body, foot, sections = [], landscape }: 
   return page(
     title,
     `
-  ${info.length ? `<table class="info">${info.map(([k, v]) => `<tr><td class="label">${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}</table>` : ""}
+  ${info.length ? `<table class="info">${info.map(([k, v]) => `<tr><td class="label">${esc(k)}</td><td>${cellHtml(v)}</td></tr>`).join("")}</table>` : ""}
   ${table({ head, body, foot })}
   ${sections.map((sec) => `<h3>${esc(sec.heading)}</h3>${table(sec, sec.emptyText)}`).join("")}`,
     landscape

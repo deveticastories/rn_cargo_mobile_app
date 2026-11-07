@@ -15,6 +15,7 @@ import { Card, DashedDivider, IconTile, SectionTitle } from "@/components/primit
 import { LargeHeader, Notice, Screen } from "@/components/Screen";
 import { SelectField } from "@/components/SelectSheet";
 import { TextField } from "@/components/TextField";
+import { Place, PlaceSegs } from "@/components/Place";
 import { Txt } from "@/components/Txt";
 import { useRefresh } from "@/hooks/useBootstrapData";
 import { useCustomerLookup } from "@/hooks/useCustomerLookup";
@@ -34,6 +35,10 @@ import { fullDate, money } from "@/utils/format";
 import { downloadInvoicePdf } from "@/utils/invoicePdf";
 import { canonicalPlace, isIndiaToUae } from "@/utils/pricing";
 import { docToFormValues, MASTERS } from "@/features/masters/config";
+
+/** A delivery partner's charge for the dropdown ("no charge yet" until one is set). */
+const partnerChargeText = (p: BackendDoc) =>
+  p.charge !== undefined && p.charge !== null && String(p.charge) !== "" ? money(num(p.charge)) : "no charge yet";
 
 export function InvoicesScreen() {
   const t = useTheme();
@@ -124,7 +129,10 @@ export function InvoicesScreen() {
   const partnerChoices = [...matchingPartners, ...activePartners.filter((p) => !matchingPartners.includes(p))].map((p) => ({
     value: p._id,
     label: str(p.name),
-    sublabel: [`${countryName(p.from) || "—"} → ${countryName(p.toCountry) || "—"}`, p.charge !== undefined && p.charge !== null && String(p.charge) !== "" ? money(num(p.charge)) : "no charge yet"].join(" · "),
+    sublabel: [`${countryName(p.from) || "—"} → ${countryName(p.toCountry) || "—"}`, partnerChargeText(p)].join(" · "),
+    sublabelNode: (
+      <PlaceSegs segs={[{ country: countryName(p.from) || "—" }, " → ", { country: countryName(p.toCountry) || "—" }, ` · ${partnerChargeText(p)}`]} />
+    ),
   }));
   // The charge lives on the delivery partner; when the partner has none yet it's entered here once.
   const partnerHasCharge = partner !== undefined && partner.charge !== undefined && partner.charge !== null && String(partner.charge) !== "";
@@ -261,12 +269,23 @@ export function InvoicesScreen() {
                 label="Booking ID"
                 placeholder="Choose booking ID"
                 value={bookingId}
+                // Opening the picker reads the container's bookings (and their invoices) again.
+                onOpen={() => {
+                  dispatch(fetchContainers());
+                  dispatch(fetchBookings());
+                  dispatch(fetchFinance());
+                }}
                 options={containerBookings.map((b) => ({ value: b.id, label: b.code, sublabel: `${b.sender.name} → ${b.receiver.name}` }))}
                 onChange={(v) => {
                   setBookingId(v);
                   setNewPrice("");
                   setNewCharge("");
                   setPartnerId("");
+                  // Fresh figures for the chosen booking's preview: price, receiver discount, delivery partners.
+                  dispatch(fetchMaster("pricing"));
+                  dispatch(fetchMaster("customers"));
+                  dispatch(fetchMaster("deliveryPartners"));
+                  dispatch(fetchMaster("countries"));
                 }}
                 emptyText="No bookings in this container."
               />
@@ -300,7 +319,7 @@ export function InvoicesScreen() {
                   />
                 )}
                 <TotalRow label="Receiver" value={booking.receiver.name || "—"} />
-                <TotalRow label="Receiver country" value={lookup.receiverCountry(booking) || "—"} />
+                <TotalRow label="Receiver country" value={lookup.receiverCountry(booking) ? <Place country={lookup.receiverCountry(booking)} /> : "—"} />
                 {/* Like the web: the partner's charge is added to the total once a partner is chosen. */}
                 {deliveryCharge !== undefined && (
                   <TotalRow
@@ -408,7 +427,13 @@ export function InvoicesScreen() {
                       </Txt>
                       {b && (
                         <Txt size={12} muted numberOfLines={1}>
-                          To {[b.receiver.name, lookup.receiverCountry(b)].filter(Boolean).join(" · ")}
+                          To {b.receiver.name}
+                          {lookup.receiverCountry(b) ? (
+                            <>
+                              {b.receiver.name ? " · " : ""}
+                              <Place country={lookup.receiverCountry(b)} />
+                            </>
+                          ) : null}
                         </Txt>
                       )}
                       {inv.deliveryCharge !== undefined && (
@@ -452,7 +477,7 @@ export function InvoicesScreen() {
   );
 }
 
-function TotalRow({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function TotalRow({ label, value, strong }: { label: string; value: React.ReactNode; strong?: boolean }) {
   return (
     <View style={styles.totalRow}>
       <Txt size={strong ? 15 : 13} weight={strong ? "bold" : "regular"} muted={!strong} style={{ flex: 1, marginRight: 12 }}>
